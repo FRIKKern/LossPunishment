@@ -17,8 +17,13 @@ jobs:
       # Step 2: Prepare Release Directory
       - name: Prepare Release Directory
         run: |
-          # Ensure all files are placed inside the 'LossPunishment' directory
-          mkdir LossPunishment
+          # Remove LossPunishment directory if it already exists
+          rm -rf LossPunishment
+          
+          # Create a fresh LossPunishment directory
+          mkdir -p LossPunishment
+          
+          # Copy addon files to the release directory
           cp Core.lua LossPunishment/
           cp UI.lua LossPunishment/
           cp Options.lua LossPunishment/

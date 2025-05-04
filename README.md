@@ -1,6 +1,6 @@
 # LossPunishment
 
-A World of Warcraft addon that turns PvP losses into exercise opportunities!
+A World of Warcraft addon that turns PvP losses into exercise opportunities!!
 
 ## Description
 
@@ -43,6 +43,52 @@ Access the options panel via the command `/lp options` or through the Interface 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Deployment
+
+This project includes deployment scripts to automate the release process:
+
+### Windows (PowerShell)
+
+```powershell
+# Create a patch release (increment third number: 0.1.0 -> 0.1.1)
+.\deploy.ps1
+
+# Create a minor release (increment second number: 0.1.0 -> 0.2.0)
+.\deploy.ps1 -VersionIncrement "minor"
+
+# Create a major release (increment first number: 0.1.0 -> 1.0.0)
+.\deploy.ps1 -VersionIncrement "major"
+
+# Customize commit message
+.\deploy.ps1 -CommitMessage "Added new features"
+```
+
+### Linux/macOS (Bash)
+
+```bash
+# Make the script executable
+chmod +x deploy.sh
+
+# Create a patch release (increment third number: 0.1.0 -> 0.1.1)
+./deploy.sh
+
+# Create a minor release (increment second number: 0.1.0 -> 0.2.0)
+./deploy.sh --minor
+
+# Create a major release (increment first number: 0.1.0 -> 1.0.0)
+./deploy.sh --major
+
+# Customize commit message
+./deploy.sh -m "Added new features"
+```
+
+The scripts will:
+1. Update the version number in the TOC file
+2. Commit all changes
+3. Create a version tag
+4. Push to GitHub
+5. Trigger the GitHub Actions workflow to create a release
 
 ## License
 

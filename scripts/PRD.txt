@@ -1,0 +1,107 @@
+<context>
+# Overview  
+LossPunishment is a World of Warcraft: Retail addon designed to introduce a simple, lighthearted fitness challenge into the player's PvP experience. The core purpose is to provide a fun, optional prompt for physical activity after losing an arena match or battleground. It's targeted at WoW players who enjoy PvP and are open to incorporating small fitness breaks into their gaming sessions. When a player experiences a loss and subsequently leaves the instance, the addon displays a notification suggesting a short exercise set.
+
+# Core Features (MVP)
+-   **PvP Loss Detection:** The addon must reliably detect when a player's team loses a standard Arena match (2v2, 3v3, Solo Shuffle) or an unrated Battleground.
+-   **Instance Exit Trigger:** The addon must detect when the player leaves the Arena or Battleground instance *after* a loss has been registered for that instance.
+-   **Exercise Prompt UI:** Upon exiting a lost instance, a simple, clear window will appear in the center of the screen.
+-   **Rotating Exercise Display:** The UI prompt will display one of three exercises in a fixed rotation sequence:
+    1.  10 Pushups
+    2.  10 Squats
+    3.  15 Sit-ups
+    The addon will remember the next exercise in the sequence for the subsequent loss.
+-   **Dismissible Prompt:** The UI window must have a clear way to be closed by the user (e.g., an "OK" or "Close" button).
+
+# User Experience (MVP)
+-   **Interaction:** The primary interaction is passive. The addon automatically detects losses and displays the prompt upon leaving the instance. No configuration is required from the user for the MVP.
+-   **Flow:**
+    1.  Player joins an Arena or Battleground.
+    2.  Player's team loses the match/BG.
+    3.  Player leaves the instance (returns to a city, open world, etc.).
+    4.  The LossPunishment window appears center-screen, showing the *next* exercise in the rotation.
+    5.  Player clicks the button to close the window.
+-   **UI:** A single, non-intrusive modal frame. It should clearly state the exercise and repetition count.
+
+# Technical Architecture (MVP)
+-   **Language:** Lua
+-   **Platform:** World of Warcraft: Retail API
+-   **Core Files:**
+    -   `LossPunishment.toc`: Addon metadata, declares Lua files and SavedVariables.
+    -   `Core.lua`: Handles event registration (entering/leaving instances, match completion), loss detection logic, state management (tracking if currently in PvP instance, tracking loss status), and SavedVariables for exercise rotation state.
+    -   `UI.lua`: Creates, manages, and displays the pop-up `Frame` using standard WoW `FrameXML`. Includes the text display and the close button.
+-   **WoW API Events (Potential - Needs Verification):**
+    -   `ZONE_CHANGED_NEW_AREA`: To detect entering/leaving instances.
+    -   `UPDATE_BATTLEFIELD_SCORE`: To monitor BG progress and potential end conditions.
+    -   `PVP_MATCH_COMPLETE` / `ARENA_OPPONENT_UPDATE` / similar events: To detect arena end and win/loss status. Specific event payloads need investigation for reliable loss detection.
+-   **Data Storage:** `SavedVariables` (account-wide) will be used to store a single numerical index representing the next exercise in the rotation sequence (e.g., 1 for pushups, 2 for squats, 3 for sit-ups).
+
+# Development Roadmap (MVP)
+-   **Phase 1: Foundation & Event Handling**
+    -   Set up the basic addon structure (`.toc`, Lua files).
+    -   Implement event listeners to detect entering and leaving Arena/BG instances (`ZONE_CHANGED_NEW_AREA`).
+    -   Implement basic state tracking (e.g., `isInPvPInstance`).
+-   **Phase 2: Loss & Exit Detection**
+    -   Research and implement reliable event listeners and logic to detect match/BG completion and determine win/loss status. Store the loss status temporarily.
+    -   Refine the exit detection to only trigger the prompt logic if the player leaves an instance *after* a loss was recorded for that specific instance.
+-   **Phase 3: UI Implementation**
+    -   Create the basic UI frame (`FrameXML`) with text display and a close button (`UI.lua`).
+    -   Implement functions to show/hide the frame.
+-   **Phase 4: Rotation Logic & Integration**
+    -   Implement the exercise rotation logic (cycle through 1, 2, 3).
+    -   Implement saving/loading the rotation state using `SavedVariables`.
+    -   Connect the loss/exit detection logic to trigger the UI display, passing the correct exercise text based on the saved rotation state. Update and save the state after display.
+-   **Phase 5: Testing & Refinement**
+    -   Test thoroughly in various Arenas and BGs, covering different scenarios (wins, losses, leaving early, disconnects if feasible).
+    -   Refine event handling and logic based on testing.
+
+# Logical Dependency Chain (MVP)
+1.  Core addon structure must exist before event handling can be added.
+2.  Event handling for entering/leaving instances is needed before loss detection within an instance can be reliably tracked.
+3.  Loss detection logic must be functional before the trigger for the UI prompt can be implemented.
+4.  The UI frame must be created before it can be shown.
+5.  The rotation logic and SavedVariables are needed to display the *correct* exercise.
+6.  All components must be integrated for the final functionality.
+
+# Risks and Mitigations (MVP)
+-   **Risk:** Difficulty in reliably detecting win/loss across all PvP formats (especially Solo Shuffle rounds vs. match end).
+    -   **Mitigation:** Focus initial implementation on simpler formats (e.g., 2v2, standard BGs). Use multiple API events if necessary for robustness. Accept that edge cases might exist in MVP.
+-   **Risk:** WoW API changes in future patches breaking detection logic.
+    -   **Mitigation:** Design using established API events where possible. Requires ongoing maintenance and testing after major WoW patches.
+-   **Risk:** The pop-up UI becomes annoying or conflicts with other UI elements/addons.
+    -   **Mitigation:** Ensure the prompt *only* appears after leaving the instance, not during gameplay. Keep the UI simple and standard. Make dismissal easy.
+
+# Appendix
+-   None for MVP.
+</context>
+<PRD>
+# Technical Architecture  
+[Outline the technical implementation details:
+- System components
+- Data models
+- APIs and integrations
+- Infrastructure requirements]
+
+# Development Roadmap  
+[Break down the development process into phases:
+- MVP requirements
+- Future enhancements
+- Do not think about timelines whatsoever -- all that matters is scope and detailing exactly what needs to be build in each phase so it can later be cut up into tasks]
+
+# Logical Dependency Chain
+[Define the logical order of development:
+- Which features need to be built first (foundation)
+- Getting as quickly as possible to something usable/visible front end that works
+- Properly pacing and scoping each feature so it is atomic but can also be built upon and improved as development approaches]
+
+# Risks and Mitigations  
+[Identify potential risks and how they'll be addressed:
+- Technical challenges
+- Figuring out the MVP that we can build upon
+- Resource constraints]
+
+# Appendix  
+[Include any additional information:
+- Research findings
+- Technical specifications]
+</PRD>

@@ -1,0 +1,10 @@
+## Interface: 100200
+## Title: LossPunishment
+## Notes: Records losses in battlegrounds and arenas and punishes you with exercises.
+## Author: Frikk Jarl
+## Version: 0.1.0
+## SavedVariables: LossPunishmentDB
+
+Core.lua
+UI.lua
+Options.lua 

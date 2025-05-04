@@ -1,0 +1,61 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers the workflow when a tag starting with 'v' is pushed
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      # Step 2: Prepare Release Directory
+      - name: Prepare Release Directory
+        run: |
+          # Ensure all files are placed inside the 'LossPunishment' directory
+          mkdir LossPunishment
+          cp Core.lua LossPunishment/
+          cp UI.lua LossPunishment/
+          cp Options.lua LossPunishment/
+          cp LossPunishment.toc LossPunishment/
+          cp README.md LossPunishment/ || echo "No README.md found"
+          cp LICENSE LossPunishment/ || echo "No LICENSE file found"
+          # Update copyright year in LICENSE file if it exists
+          if [ -f LossPunishment/LICENSE ]; then
+            sed -i "s/Copyright (c) [0-9]* Frikk Jarl/Copyright (c) 2024 Frikk Jarl/" LossPunishment/LICENSE
+          fi
+          # Copy any additional library folders if they exist
+          # cp -r LibStub LossPunishment/ || echo "No LibStub folder found"
+
+      # Step 3: Zip Release Files
+      - name: Zip Release Files
+        run: |
+          zip -r LossPunishment.zip LossPunishment  # Zip the 'LossPunishment' directory to include it in the archive
+
+      # Step 4: Create GitHub Release
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+      # Step 5: Upload Release Asset
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./LossPunishment.zip
+          asset_name: LossPunishment.zip
+          asset_content_type: application/zip 

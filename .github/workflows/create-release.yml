@@ -8,6 +8,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    
+    # Add explicit permission for creating releases
+    permissions:
+      contents: write
 
     steps:
       # Step 1: Checkout the repository

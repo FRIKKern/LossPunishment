@@ -58,9 +58,21 @@ Write-Host "New version: $newVersion" -ForegroundColor Cyan
 $tocContent = $tocContent -replace "## Version: $currentVersion", "## Version: $newVersion"
 Set-Content -Path "LossPunishment.toc" -Value $tocContent
 
-# 4. Stage all changes
-Write-Host "Staging changes..." -ForegroundColor Yellow
-git add .
+# Update version in Core.lua
+$coreLuaContent = Get-Content "Core.lua"
+$coreLuaContent = $coreLuaContent -replace 'LP.Version = ".*"', "LP.Version = ""$newVersion""" 
+Set-Content -Path "Core.lua" -Value $coreLuaContent
+Write-Host "Updated version in Core.lua and .toc file" -ForegroundColor Cyan
+
+# 4. Stage only the necessary files (not everything)
+Write-Host "Staging specific addon files..." -ForegroundColor Yellow
+git add LossPunishment.toc
+git add Core.lua
+git add UI.lua
+git add Options.lua
+# Add any other specific files that should be included in the release
+# git add README.md
+# git add LICENSE
 
 # 5. Commit with message
 $fullCommitMessage = "$CommitMessage (v$newVersion)"

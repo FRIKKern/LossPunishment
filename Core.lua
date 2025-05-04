@@ -3,7 +3,7 @@ local addonName, addonTable = ...
 -- Create a namespace for the addon
 LossPunishment = LossPunishment or {}
 local LP = LossPunishment
-LP.Version = "0.1.5" -- Update version to match .toc file
+LP.Version = "0.1.6" -- Update version to match .toc file
 
 -- List of exercises
 LP.exercises = {
@@ -254,10 +254,17 @@ function LP:RegisterEvents()
     frame:RegisterEvent("CHAT_MSG_SYSTEM")
     
     -- Events that might vary between WoW versions (register safely)
-    LP:SafeRegisterEvent(frame, "PVP_MATCH_COMPLETE")
     LP:SafeRegisterEvent(frame, "UPDATE_BATTLEFIELD_STATUS")
     LP:SafeRegisterEvent(frame, "CHAT_MSG_BG_SYSTEM_NEUTRAL")
     LP:SafeRegisterEvent(frame, "CHAT_MSG_HONOR_GAIN")
+    
+    -- Modern PvP events (Dragonflight and later)
+    LP:SafeRegisterEvent(frame, "PVP_MATCH_COMPLETE")
+    LP:SafeRegisterEvent(frame, "PVP_MATCH_INACTIVE") 
+    
+    -- Check if C_PvP API is available and store result for later use
+    LP.hasCPvPAPI = (C_PvP ~= nil)
+    LP:DebugPrint("C_PvP API available: " .. tostring(LP.hasCPvPAPI))
     
     -- Potentially version-specific arena events (register safely)
     local hasArenaMatchEnd = LP:SafeRegisterEvent(frame, "ARENA_MATCH_END")
@@ -334,11 +341,27 @@ function LP:RegisterEvents()
                     end
                 end
             elseif currentEvent == "PVP_MATCH_COMPLETE" then
-                -- New event for retail arena end
+                -- Modern event for retail arena end
                 if LP.isInPvPInstance and LP.currentInstanceType == "arena" then
                     local winner = ...
+                    
+                    -- First, check if we can use C_PvP API to determine arena type
+                    local isRatedArena = false
+                    local isSoloShuffle = false
+                    if LP.hasCPvPAPI then
+                        -- Safely try to use modern C_PvP API functions
+                        pcall(function()
+                            isRatedArena = C_PvP.IsRatedArena()
+                            isSoloShuffle = C_PvP.IsSoloShuffle()
+                        end)
+                        LP:DebugPrint("Arena type: Rated=" .. tostring(isRatedArena) .. 
+                                      ", SoloShuffle=" .. tostring(isSoloShuffle))
+                    end
+                    
+                    -- Get player's team for comparison
                     local myTeam = LP:GetPlayerTeamIndex()
-                    LP:DebugPrint("PVP match complete - winner team: " .. tostring(winner) .. ", my team: " .. tostring(myTeam))
+                    LP:DebugPrint("PVP match complete - winner team: " .. tostring(winner) .. 
+                                  ", my team: " .. tostring(myTeam))
                     
                     if winner == myTeam then
                         -- Player's team is the winner
@@ -350,6 +373,76 @@ function LP:RegisterEvents()
                         LP:DebugPrint("Arena match complete, player's team lost")
                         LP.hasLostCurrentInstance = true
                         print(addonName .. ": Arena loss detected. Punishment will be triggered when you leave the arena.")
+                    end
+                    
+                    -- For Solo Shuffle, handle special case
+                    if isSoloShuffle then
+                        -- In Solo Shuffle, check personal performance
+                        -- You could add a special code path here for Solo Shuffle score checking
+                        LP:DebugPrint("Solo Shuffle match detected - checking performance")
+                    end
+                end
+            elseif currentEvent == "PVP_MATCH_INACTIVE" then
+                -- Match is fully over (player leaving instance)
+                if LP.wasInPvPInstance and LP.currentInstanceType == "arena" then
+                    LP:DebugPrint("PVP match inactive - player fully leaving arena")
+                    
+                    -- For Solo Shuffle, attempt to get the final results
+                    if LP.hasCPvPAPI then
+                        pcall(function()
+                            local isSoloShuffle = C_PvP.IsSoloShuffle()
+                            if isSoloShuffle then
+                                LP:HandleSoloShuffle()
+                            end
+                        end)
+                    end
+                    
+                    -- Last chance to get rating change via APIs
+                    if not LP.db.lastArenaWasWin and not LP.hasLostCurrentInstance then
+                        -- Try C_PvP API first
+                        local ratingChecked = false
+                        if LP.hasCPvPAPI then
+                            pcall(function()
+                                if C_PvP.GetArenaMatchResults then
+                                    local results = C_PvP.GetArenaMatchResults()
+                                    if results and results.personalRatedInfo then
+                                        local ratingChange = results.personalRatedInfo.ratingChange
+                                        
+                                        if ratingChange > 0 then
+                                            LP.db.lastArenaWasWin = true
+                                            LP:DebugPrint("Match inactive: Final check - rating increased by " .. ratingChange)
+                                            print(addonName .. ": Last check - win detected from rating change! No punishment needed.")
+                                            ratingChecked = true
+                                        elseif ratingChange < 0 then
+                                            LP.hasLostCurrentInstance = true
+                                            LP:DebugPrint("Match inactive: Final check - rating decreased by " .. ratingChange)
+                                            print(addonName .. ": Last check - loss detected from rating change. Punishment will be triggered.")
+                                            ratingChecked = true
+                                        end
+                                    end
+                                end
+                            end)
+                        end
+                        
+                        -- Fall back to older APIs if needed
+                        if not ratingChecked then
+                            -- Use GetBattlefieldTeamInfo if available
+                            if GetBattlefieldTeamInfo then
+                                local success, info = pcall(function() return {GetBattlefieldTeamInfo(0)} end)
+                                if success and info and #info >= 2 then
+                                    local myRating, myRatingChange = info[1], info[2]
+                                    LP:DebugPrint("Match inactive: Last rating check - " .. tostring(myRating) .. ", change: " .. tostring(myRatingChange))
+                                    
+                                    if myRatingChange and myRatingChange > 0 then
+                                        LP.db.lastArenaWasWin = true
+                                        print(addonName .. ": Last check - win detected from rating change! No punishment needed.")
+                                    elseif myRatingChange and myRatingChange < 0 then
+                                        LP.hasLostCurrentInstance = true
+                                        print(addonName .. ": Last check - loss detected from rating change. Punishment will be triggered.")
+                                    end
+                                end
+                            end
+                        end
                     end
                 end
             elseif currentEvent == "UPDATE_BATTLEFIELD_STATUS" then
@@ -441,8 +534,39 @@ end
 
 -- New helper function to get player's team index
 function LP:GetPlayerTeamIndex()
-    -- Try to determine player's team index (0 or 1)
+    -- Try modern API first
+    if LP.hasCPvPAPI then
+        local success, teamID = pcall(function()
+            -- In modern API, we can get the team info directly
+            if C_PvP.GetActiveMatchState then
+                local matchState = C_PvP.GetActiveMatchState()
+                if matchState and matchState.playerTeamID then
+                    return matchState.playerTeamID
+                end
+            end
+            
+            -- Alternative method: check the scoreboard
+            if C_PvP.GetScoreInfo then
+                for i = 1, GetNumBattlefieldScores() do
+                    local scoreInfo = C_PvP.GetScoreInfo(i)
+                    if scoreInfo and scoreInfo.name == UnitName("player") then
+                        return scoreInfo.faction -- Should be 0 or 1
+                    end
+                end
+            end
+            return nil
+        end)
+        
+        if success and teamID ~= nil then
+            LP:DebugPrint("Got player team index from C_PvP API: " .. teamID)
+            return teamID
+        end
+    end
+    
+    -- Fall back to traditional methods if modern API failed or unavailable
     local myTeam = nil
+    
+    -- Try to get team from the scoreboard (most reliable legacy method)
     for i = 1, GetNumBattlefieldScores() do
         local name, _, _, _, _, team = GetBattlefieldScore(i)
         -- GetBattlefieldScore returns different values in different game versions
@@ -451,12 +575,22 @@ function LP:GetPlayerTeamIndex()
         -- In some versions, the player name is the first return
         if name == UnitName("player") then
             myTeam = team
+            LP:DebugPrint("Got player team index from GetBattlefieldScore: " .. tostring(team))
             break
         end
-        
-        -- In other versions, the data might be structured differently
-        -- Add more checks if needed based on testing
     end
+    
+    -- If still no team identified, try faction-based guess
+    if not myTeam then
+        local playerFaction = UnitFactionGroup("player")
+        if playerFaction == "Horde" then
+            myTeam = 0 -- Green team (usually)
+        elseif playerFaction == "Alliance" then
+            myTeam = 1 -- Gold team (usually)
+        end
+        LP:DebugPrint("No team found, using faction-based guess: " .. tostring(myTeam))
+    end
+    
     return myTeam
 end
 
@@ -468,7 +602,46 @@ function LP:CheckArenaMatchResult()
     
     LP:DebugPrint("Checking arena match result")
     
-    -- First method: Check winner from API (most reliable)
+    -- First try modern C_PvP API (most reliable for current versions)
+    if LP.hasCPvPAPI then
+        -- Safe check using pcall
+        local success, isRated, isShuffle = pcall(function()
+            return C_PvP.IsRatedArena(), C_PvP.IsSoloShuffle()
+        end)
+        
+        if success then
+            LP:DebugPrint("Arena status - Rated: " .. tostring(isRated) .. ", Solo Shuffle: " .. tostring(isShuffle))
+            
+            -- Try to get rating change directly from C_PvP if available
+            pcall(function()
+                -- Check if GetArenaMatchResults is available (newer API)
+                if C_PvP.GetArenaMatchResults then
+                    local results = C_PvP.GetArenaMatchResults()
+                    if results then
+                        local myRating = results.personalRatedInfo.rating
+                        local ratingChange = results.personalRatedInfo.ratingChange
+                        
+                        LP:DebugPrint("Arena match results - Current rating: " .. tostring(myRating) .. 
+                                      ", Change: " .. tostring(ratingChange))
+                        
+                        if ratingChange > 0 then
+                            LP:DebugPrint("Positive rating change detected via C_PvP API - definite win")
+                            LP.db.lastArenaWasWin = true
+                            print(addonName .. ": Arena win detected from rating gain! No punishment needed.")
+                            return true
+                        elseif ratingChange < 0 then
+                            LP:DebugPrint("Negative rating change detected via C_PvP API - definite loss")
+                            LP.hasLostCurrentInstance = true
+                            print(addonName .. ": Arena loss detected from rating loss. Punishment will be triggered when you leave the arena.")
+                            return false
+                        end
+                    end
+                end
+            end)
+        end
+    end
+    
+    -- Second method: Check winner from older API (fallback)
     if LP.hasGetBattlefieldWinner and GetBattlefieldWinner then
         local success, winner = pcall(GetBattlefieldWinner)
         if success then
@@ -521,7 +694,7 @@ function LP:CheckArenaMatchResult()
         end
     end
     
-    -- Second method: Check rating change directly
+    -- Third method: Check rating change directly (legacy approach)
     if GetBattlefieldTeamInfo then
         -- Use pcall for safety
         local success, info = pcall(function() return {GetBattlefieldTeamInfo(0)} end)
@@ -543,7 +716,7 @@ function LP:CheckArenaMatchResult()
         end
     end
     
-    -- Third method: Check score data
+    -- Fourth method: Check score data (least reliable)
     if GetTeamScore then
         local success, myTeam = pcall(LP.GetPlayerTeamIndex, LP)
         if success and myTeam then
@@ -659,177 +832,87 @@ function LP:ProcessSystemMessage(msg)
             "Your team won",
             
             -- Score patterns
-            "^(%d+)%s*%-%s*(%d+)",  -- Score pattern like "3-0" 
-            "wins %d+%s*to%s*%d+",  -- Format: "Team X wins 3 to 0"
+            "scored a victory",
             
-            -- Rating change indicators
-            "You gain %d+ rating",
-            "Your personal rating has increased by %d+",
-            "rating changed .+ %+%d+",
-            
-            -- Match end with win context
-            "won the Arena match",
-            " has won the match",
-            
-            -- New patterns from ArenaAnalytics
-            "Team score: %d+",     -- Score message
-            "You gain %d+ honor",  -- Honor gain (almost always a win)
-            "You gain conquest",   -- Conquest gain (always a win)
-            "final score: %d+",    -- Final score message
-            "Team %d defeated",    -- Team defeat message that isn't your team
-            "winner! %d+",         -- Winner announcement 
-            
-            -- Some versions have these formats
-            "Arena ended. You earn",
-            "Arena battle won!"
+            -- Honor/rating gain patterns
+            "rating increased",
+            "rating has increased",
+            "gained rating",
+            "rating gain",
+            "earned .* rating",
+            "received .* honor",
+            "honor gained"
         }
         
-        for i, pattern in ipairs(arenaWinPatterns) do
-            local match = string.match(msg, pattern)
-            if match then
-                -- Special handling for score pattern (e.g. "3 - 0")
-                if i == 10 then -- This is the score pattern index (^(%d+)%s*%-%s*(%d+))
-                    local score1, score2 = string.match(msg, "^(%d+)%s*%-%s*(%d+)")
-                    if score1 and score2 then
-                        local playerScore = tonumber(score1)
-                        local enemyScore = tonumber(score2)
-                        
-                        -- In most formats, higher score means win
-                        if playerScore > enemyScore then
-                            LP:DebugPrint("Detected Arena WIN via score: " .. playerScore .. " - " .. enemyScore)
-                            winDetected = true
-                            LP.db.lastArenaWasWin = true
-                            print(addonName .. ": Arena win detected from score! No punishment needed.")
-                            return
-                        end
-                    end
-                else
-                    -- Regular pattern match
-                    LP:DebugPrint("Detected Arena WIN via system message: " .. msg)
-                    winDetected = true
-                    LP.db.lastArenaWasWin = true
-                    print(addonName .. ": Arena win detected! No punishment needed.")
-                    return
-                end
+        for _, pattern in ipairs(arenaWinPatterns) do
+            if string.find(string.lower(msg), string.lower(pattern)) then
+                LP:DebugPrint("Detected Arena Win via system message: " .. msg)
+                LP.db.lastArenaWasWin = true
+                print(addonName .. ": Arena win detected! No punishment will be triggered.")
+                winDetected = true
+                break
             end
         end
     end
-
-    -- Already detected a loss for this instance
-    if LP.hasLostCurrentInstance then
-        return
-    end
-
-    -- Arena Loss Detection
-    if LP.currentInstanceType == "arena" then
-        -- Track arena end separately from win/loss for debugging
-        if string.find(msg, "arena.*ended") or 
-           string.find(msg, "match.*complete") or 
-           string.find(msg, "battle.*ended") or
-           string.find(msg, "victory") or 
-           string.find(msg, "defeat") then
-            LP:DebugPrint("Arena match end detected.")
-            
-            -- Try to get more specific arena information using multiple methods
-            
-            -- Method 1: GetBattlefieldTeamInfo
-            local info = { GetBattlefieldTeamInfo(0) }
-            local myRating, myRatingChange = unpack(info)
-            LP:DebugPrint("Your team final info - Rating: " .. tostring(myRating) .. ", Change: " .. tostring(myRatingChange))
-            
-            if myRatingChange and myRatingChange > 0 then
-                LP:DebugPrint("Positive rating change detected - marking as win")
-                LP.db.lastArenaWasWin = true
-                print(addonName .. ": Arena win detected from rating change! No punishment needed.")
-                return
-            end
-            
-            -- Method 2: Check winner directly
-            local winner = GetBattlefieldWinner()
-            local myTeam = LP:GetPlayerTeamIndex()
-            LP:DebugPrint("Winner: " .. tostring(winner) .. ", My team: " .. tostring(myTeam))
-            
-            if winner == myTeam then
-                LP:DebugPrint("Winner matches player team - marking as win")
-                LP.db.lastArenaWasWin = true
-                print(addonName .. ": Arena win detected from winner check! No punishment needed.")
-                return
-            end
-            
-            -- Method 3: Get scores
-            if GetTeamScore then
-                local myTeamScore = GetTeamScore(myTeam or 0)
-                local otherTeamScore = GetTeamScore(myTeam == 0 and 1 or 0)
-                LP:DebugPrint("Team scores - Mine: " .. tostring(myTeamScore) .. ", Other: " .. tostring(otherTeamScore))
-                
-                if myTeamScore and otherTeamScore and myTeamScore > otherTeamScore then
-                    LP:DebugPrint("Higher score - marking as win")
-                    LP.db.lastArenaWasWin = true
-                    print(addonName .. ": Arena win detected from team scores! No punishment needed.")
-                    return
-                end
-            end
-        end
-        
-        -- Expanded patterns for Retail WoW arena loss messages
+    
+    -- Arena Loss Detection (only if win not already detected)
+    if LP.currentInstanceType == "arena" and not winDetected then
         local arenaLossPatterns = {
-            "You lose", -- General pattern
-            "You have lost the arena", -- Some versions
-            "You were defeated", -- Retail common message
-            "Your team has been defeated", -- Other versions
-            "has defeated your team", -- Yet another variant
-            "has won the arena match", -- When opponent team wins
-            " wins!", -- Common retail message
-            "The Arena battle has ended", -- End message that happens on both win/loss
-            "Defeat", -- Retail defeat message
-            "Match complete", -- General completion message
-            "defeated by", -- Appears in many defeat messages
-            "Lost:", -- Arena score message
-            "%d+%s*%-%s*%d+", -- Score pattern like "0 - 3"
-            "has ended", -- Generic end message
-            "battle is over", -- Another end message
-            "defeat", -- Lowercase defeat message
-            "your team has lost", -- Specific loss message
-            "your team was defeated", -- Another specific loss message
-            "the opposing team is victorious", -- Opposition victory message
-            "arena concluded" -- Generic conclusion message
+            -- Direct loss statements
+            "You lose",
+            "You were defeated",
+            "Defeat",
+            "You lost",
+            "was defeated",
+            "have been defeated",
+            "you have lost",
+            "match.*lost",
+            "defeat.*match",
+            "your team has been defeated",
+            "rating decreased",
+            "rating has decreased",
+            "lost rating",
+            "rating loss"
         }
         
         for _, pattern in ipairs(arenaLossPatterns) do
-            if string.find(msg, pattern) then
-                -- For generic messages like "match complete" or "has ended"
-                -- we shouldn't mark as loss immediately if they can also appear on wins
-                local isGenericMessage = (pattern == "The Arena battle has ended" or 
-                                         pattern == "Match complete" or 
-                                         pattern == "has ended" or
-                                         pattern == "battle is over" or
-                                         pattern == "arena concluded")
-                
-                if isGenericMessage then
-                    -- For generic messages, check if we've already detected a win
-                    if not LP.db.lastArenaWasWin then
-                        LP:DebugPrint("Generic arena end message detected, waiting for win confirmation: " .. msg)
-                        
-                        -- Set timer to check if we need to assume a loss
-                        C_Timer.After(3.0, function()
-                            if LP.isInPvPInstance and not LP.db.lastArenaWasWin and not LP.hasLostCurrentInstance then
-                                LP:DebugPrint("No explicit win detected after arena end message - assuming loss")
-                                LP.hasLostCurrentInstance = true
-                            end
-                        end)
-                    end
-                else
-                    -- For specific loss messages
-                    LP:DebugPrint("Detected Arena Loss via system message: " .. msg)
-                    LP.hasLostCurrentInstance = true
-                    LP.db.lastArenaWasWin = false
-                    print(addonName .. ": Arena loss detected. Punishment will be triggered when you leave the arena.")
-                    return
-                end
+            if string.find(string.lower(msg), string.lower(pattern)) then
+                LP:DebugPrint("Detected Arena Loss via system message: " .. msg)
+                LP.hasLostCurrentInstance = true
+                print(addonName .. ": Arena loss detected. Punishment will be triggered when you leave the arena.")
+                break
             end
         end
     end
 
+    -- Arena match end detection - track when match ends to improve detection
+    if LP.currentInstanceType == "arena" then
+        local arenaEndPatterns = {
+            "arena.*ended",
+            "match.*complete",
+            "battle.*ended", 
+            "victory",
+            "defeat",
+            "The arena match has ended",
+            "has left the arena"
+        }
+        
+        for _, pattern in ipairs(arenaEndPatterns) do
+            if string.find(string.lower(msg), string.lower(pattern)) then
+                LP:DebugPrint("Arena match end detected.")
+                local info = { GetBattlefieldTeamInfo(0) }
+                local myRating, myRatingChange = unpack(info)
+                LP:DebugPrint("Your team final info - Rating: " .. tostring(myRating) .. ", Change: " .. tostring(myRatingChange))
+                if myRatingChange and myRatingChange > 0 then
+                    LP:DebugPrint("Positive rating change detected - marking as win")
+                    LP.db.lastArenaWasWin = true
+                    print(addonName .. ": Arena win detected from rating change! No punishment needed.")
+                end
+                break
+            end
+        end
+    end
+    
     -- Battleground Loss Detection
     if LP.currentInstanceType == "battleground" then
         local playerFaction = UnitFactionGroup("player") -- "Horde" or "Alliance"
@@ -1150,6 +1233,81 @@ function LP:ForceDetection()
     end
     
     return inInstance, instanceType
+end
+
+-- New function to handle Solo Shuffle matches specifically
+function LP:HandleSoloShuffle()
+    if not LP.hasCPvPAPI then return false end
+    
+    local success, isSoloShuffle = pcall(function() return C_PvP.IsSoloShuffle() end)
+    if not (success and isSoloShuffle) then return false end
+    
+    LP:DebugPrint("Processing Solo Shuffle results")
+    
+    -- Try to get personal performance
+    local personalResult = nil
+    
+    -- First attempt: try to use GetArenaMatchResults if available
+    pcall(function()
+        if C_PvP.GetArenaMatchResults then
+            local results = C_PvP.GetArenaMatchResults()
+            if results and results.personalRatedInfo then
+                local ratingChange = results.personalRatedInfo.ratingChange
+                
+                if ratingChange > 0 then
+                    personalResult = "win"
+                    LP:DebugPrint("Solo Shuffle: Positive rating change (" .. ratingChange .. ") - overall win")
+                elseif ratingChange < 0 then
+                    personalResult = "loss"
+                    LP:DebugPrint("Solo Shuffle: Negative rating change (" .. ratingChange .. ") - overall loss")
+                else
+                    LP:DebugPrint("Solo Shuffle: Neutral rating - no clear result")
+                end
+            end
+        end
+    end)
+    
+    -- Second attempt: try to check round wins vs losses
+    if not personalResult and C_PvP.GetSoloShuffleRoundInfo then
+        pcall(function()
+            local rounds = C_PvP.GetSoloShuffleRoundInfo()
+            if rounds then
+                local wins = 0
+                local losses = 0
+                
+                for _, roundInfo in ipairs(rounds) do
+                    if roundInfo.playerTeamID ~= nil and roundInfo.winningTeamID ~= nil then
+                        if roundInfo.playerTeamID == roundInfo.winningTeamID then
+                            wins = wins + 1
+                        else
+                            losses = losses + 1
+                        end
+                    end
+                end
+                
+                LP:DebugPrint("Solo Shuffle rounds: Wins=" .. wins .. ", Losses=" .. losses)
+                
+                if wins > losses then
+                    personalResult = "win"
+                elseif losses > wins then
+                    personalResult = "loss"
+                end
+            end
+        end)
+    end
+    
+    -- Apply the result
+    if personalResult == "win" then
+        LP.db.lastArenaWasWin = true
+        print(addonName .. ": Solo Shuffle overall win detected! No punishment needed.")
+        return true
+    elseif personalResult == "loss" then
+        LP.hasLostCurrentInstance = true
+        print(addonName .. ": Solo Shuffle overall loss detected. Punishment will be triggered when you leave the arena.")
+        return true
+    end
+    
+    return false -- Couldn't determine result
 end
 
 -- Create a loader frame at the file level (outside any functions)

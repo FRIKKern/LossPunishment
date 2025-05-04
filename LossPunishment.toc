@@ -2,7 +2,7 @@
 ## Title: LossPunishment
 ## Notes: Records losses in battlegrounds and arenas and punishes you with exercises.
 ## Author: Frikk Jarl
-## Version: 0.1.5
+## Version: 0.1.6
 ## SavedVariables: LossPunishmentDB
 
 Core.lua

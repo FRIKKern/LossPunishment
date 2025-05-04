@@ -3,7 +3,7 @@ local addonName, addonTable = ...
 -- Create a namespace for the addon
 LossPunishment = LossPunishment or {}
 local LP = LossPunishment
-LP.Version = "0.1.6" -- Update version to match .toc file
+LP.Version = "0.1.7" -- Update version to match .toc file
 
 -- List of exercises
 LP.exercises = {
@@ -61,7 +61,7 @@ function LP:Initialize()
                 Squats = true,
                 Situps = true
             },
-            debugMode = true -- Enable debug by default for first run
+            debugMode = false -- Debug mode off by default
         }
         LossPunishmentDB = LP.db -- Assign to global for saving
     end

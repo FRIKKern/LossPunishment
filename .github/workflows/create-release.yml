@@ -29,6 +29,7 @@ jobs:
           
           # Copy addon files to the release directory
           cp Core.lua LossPunishment/
+          cp Logo.blp LossPunishment/
           cp UI.lua LossPunishment/
           cp Options.lua LossPunishment/
           cp LossPunishment.toc LossPunishment/

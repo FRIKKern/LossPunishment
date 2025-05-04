@@ -53,12 +53,20 @@ function LP:CalculateStats()
     }
     
     -- Always return initialized stats even if no data exists yet
-    if not LP.db or not LP.db.stats then return stats end
+    if not LP.db or not LP.db.stats then 
+        LP:DebugPrint("No stats data found, returning zeros")
+        return stats 
+    end
     
     -- Ensure all exercise types exist in stats
     LP.db.stats.Pushups = LP.db.stats.Pushups or {}
     LP.db.stats.Squats = LP.db.stats.Squats or {}
     LP.db.stats.Situps = LP.db.stats.Situps or {}
+    
+    LP:DebugPrint("Calculating stats from " .. 
+                 #LP.db.stats.Pushups .. " pushups, " ..
+                 #LP.db.stats.Squats .. " squats, " ..
+                 #LP.db.stats.Situps .. " situps")
     
     for exType, timestamps in pairs(LP.db.stats) do
         for _, timestamp in ipairs(timestamps) do
@@ -351,6 +359,10 @@ function LP:CreateOptionsPanel()
         LP.db.enabledExercises = { Pushups = true, Squats = true, Situps = true }
     end
     
+    -- Pre-calculate stats once to have them ready
+    LP.cachedStats = LP:CalculateStats()
+    LP:DebugPrint("Pre-calculated stats for faster panel loading")
+    
     -- Create the main panel
     local panel = CreateFrame("Frame", "LossPunishmentOptionsPanel")
     panel.name = "LossPunishment"
@@ -467,6 +479,19 @@ function LP:CreateOptionsPanel()
             valueText:SetJustifyH("CENTER")
             valueText:SetWidth(60)
             statsValues[exType][period] = valueText
+            
+            -- Set initial values from cache (important for first-time display)
+            if LP.cachedStats then
+                local value = 0
+                if period == "Today" then value = LP.cachedStats.today[exType] * 10
+                elseif period == "This Week" then value = LP.cachedStats.week[exType] * 10
+                elseif period == "This Month" then value = LP.cachedStats.month[exType] * 10
+                elseif period == "All Time" then value = LP.cachedStats.allTime[exType] * 10
+                end
+                valueText:SetText(value)
+            else
+                valueText:SetText("0")
+            end
         end
         
         -- Add alternating row backgrounds
@@ -499,6 +524,19 @@ function LP:CreateOptionsPanel()
         valueText:SetJustifyH("CENTER")
         valueText:SetWidth(60)
         totalValues[period] = valueText
+        
+        -- Set initial total values from cache
+        if LP.cachedStats then
+            local value = 0
+            if period == "Today" then value = LP.cachedStats.today.total * 10
+            elseif period == "This Week" then value = LP.cachedStats.week.total * 10
+            elseif period == "This Month" then value = LP.cachedStats.month.total * 10
+            elseif period == "All Time" then value = LP.cachedStats.allTime.total * 10
+            end
+            valueText:SetText(value)
+        else
+            valueText:SetText("0")
+        end
     end
     
     -- View History button
@@ -520,31 +558,73 @@ function LP:CreateOptionsPanel()
         historyWindow:SetFrameStrata("HIGH")
     end)
     
+    -- Store references globally for the refresh function
+    panel.statsValues = statsValues
+    panel.totalValues = totalValues
+    panel.exerciseTypes = exerciseTypes
+    panel.periodLabels = periodLabels
+    panel.pushupsCheckbox = pushupsCheckbox
+    panel.squatsCheckbox = squatsCheckbox
+    panel.situpsCheckbox = situpsCheckbox
+    
     -- Panel refresh function
     panel.refresh = function()
-        pushupsCheckbox:SetChecked(LP.db.enabledExercises.Pushups)
-        squatsCheckbox:SetChecked(LP.db.enabledExercises.Squats)
-        situpsCheckbox:SetChecked(LP.db.enabledExercises.Situps)
+        LP:DebugPrint("Options panel refresh called")
+        
+        -- Update checkboxes
+        panel.pushupsCheckbox:SetChecked(LP.db.enabledExercises.Pushups)
+        panel.squatsCheckbox:SetChecked(LP.db.enabledExercises.Squats)
+        panel.situpsCheckbox:SetChecked(LP.db.enabledExercises.Situps)
         
         -- Calculate stats for all time periods
         local stats = LP:CalculateStats()
+        LP.cachedStats = stats -- Update the cache
         
         -- Exercise counts - show only the total reps (sessions * 10)
-        for i, exType in ipairs(exerciseTypes) do
-            statsValues[exType]["Today"]:SetText(stats.today[exType] * 10)
-            statsValues[exType]["This Week"]:SetText(stats.week[exType] * 10)
-            statsValues[exType]["This Month"]:SetText(stats.month[exType] * 10)
-            statsValues[exType]["All Time"]:SetText(stats.allTime[exType] * 10)
+        for i, exType in ipairs(panel.exerciseTypes) do
+            if panel.statsValues[exType] then
+                panel.statsValues[exType]["Today"]:SetText(stats.today[exType] * 10)
+                panel.statsValues[exType]["This Week"]:SetText(stats.week[exType] * 10)
+                panel.statsValues[exType]["This Month"]:SetText(stats.month[exType] * 10)
+                panel.statsValues[exType]["All Time"]:SetText(stats.allTime[exType] * 10)
+                LP:DebugPrint("Set " .. exType .. " stats: " .. 
+                             (stats.today[exType] * 10) .. " today, " ..
+                             (stats.week[exType] * 10) .. " week, " ..
+                             (stats.month[exType] * 10) .. " month, " ..
+                             (stats.allTime[exType] * 10) .. " all time")
+            else
+                LP:DebugPrint("Missing statsValues for " .. exType)
+            end
         end
         
         -- Total exercises (sessions * 10)
-        totalValues["Today"]:SetText(stats.today.total * 10)
-        totalValues["This Week"]:SetText(stats.week.total * 10)
-        totalValues["This Month"]:SetText(stats.month.total * 10)
-        totalValues["All Time"]:SetText(stats.allTime.total * 10)
+        if panel.totalValues then
+            panel.totalValues["Today"]:SetText(stats.today.total * 10)
+            panel.totalValues["This Week"]:SetText(stats.week.total * 10)
+            panel.totalValues["This Month"]:SetText(stats.month.total * 10)
+            panel.totalValues["All Time"]:SetText(stats.allTime.total * 10)
+            LP:DebugPrint("Set total stats: " .. 
+                         (stats.today.total * 10) .. " today, " ..
+                         (stats.week.total * 10) .. " week, " ..
+                         (stats.month.total * 10) .. " month, " ..
+                         (stats.allTime.total * 10) .. " all time")
+        else
+            LP:DebugPrint("Missing totalValues")
+        end
     end
     
-    panel:SetScript("OnShow", panel.refresh)
+    -- Multi-refresh attempt on show for maximum reliability
+    panel:SetScript("OnShow", function()
+        LP:DebugPrint("Options panel OnShow triggered - starting multi-refresh")
+        
+        -- Immediate refresh
+        panel.refresh()
+        
+        -- Additional refresh attempts with increasing delays
+        C_Timer.After(0.1, function() panel.refresh() end)
+        C_Timer.After(0.5, function() panel.refresh() end)
+        C_Timer.After(1.0, function() panel.refresh() end)
+    end)
     
     -- Store the panel reference
     LP.optionsPanel = panel
@@ -555,10 +635,54 @@ function LP:CreateOptionsPanel()
         local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
         Settings.RegisterAddOnCategory(category)
         LP.optionsCategory = category
+        
+        -- Make sure stats calculate even on first open for Dragonflight
+        category:SetCallback("OnRefresh", panel.refresh)
     else
         -- Fallback for older versions of WoW
         InterfaceOptions_AddCategory(panel)
     end
     
-    print(addonName .. ": Options panel created.")
+    -- Force multiple refresh attempts after creation with increasing delays
+    C_Timer.After(0.1, function() if panel.refresh then panel.refresh() end end)
+    C_Timer.After(0.5, function() if panel.refresh then panel.refresh() end end)
+    C_Timer.After(1.0, function() if panel.refresh then panel.refresh() end end)
+    
+    print(addonName .. ": Options panel created with statistical data.")
+end
+
+-- Add a separate function to open the options panel properly
+function LP:OpenOptionsPanel()
+    -- Pre-calculate stats before opening the panel
+    LP.cachedStats = LP:CalculateStats()
+    LP:DebugPrint("Pre-calculated stats before opening options panel")
+    
+    -- Force a full refresh of the panel if it exists
+    if LP.optionsPanel and LP.optionsPanel.refresh then
+        LP.optionsPanel.refresh()
+    end
+    
+    if Settings and Settings.OpenToCategory and LP.optionsCategory then
+        -- Use the new Settings API for Dragonflight or later
+        Settings.OpenToCategory(LP.optionsCategory:GetID())
+        
+        -- Force multiple refresh attempts after opening with increasing delays
+        C_Timer.After(0.1, function() if LP.optionsPanel and LP.optionsPanel.refresh then LP.optionsPanel.refresh() end end)
+        C_Timer.After(0.3, function() if LP.optionsPanel and LP.optionsPanel.refresh then LP.optionsPanel.refresh() end end)
+        C_Timer.After(0.6, function() if LP.optionsPanel and LP.optionsPanel.refresh then LP.optionsPanel.refresh() end end)
+        C_Timer.After(1.0, function() if LP.optionsPanel and LP.optionsPanel.refresh then LP.optionsPanel.refresh() end end)
+    elseif InterfaceOptionsFrame_OpenToCategory and LP.optionsPanel then
+        -- Fallback for older versions of WoW
+        InterfaceOptionsFrame_OpenToCategory(LP.optionsPanel)
+        -- Call it twice due to a known bug in the Blizzard UI
+        InterfaceOptionsFrame_OpenToCategory(LP.optionsPanel)
+        
+        -- Force multiple refresh attempts after opening with increasing delays
+        C_Timer.After(0.1, function() if LP.optionsPanel and LP.optionsPanel.refresh then LP.optionsPanel.refresh() end end)
+        C_Timer.After(0.3, function() if LP.optionsPanel and LP.optionsPanel.refresh then LP.optionsPanel.refresh() end end)
+        C_Timer.After(0.6, function() if LP.optionsPanel and LP.optionsPanel.refresh then LP.optionsPanel.refresh() end end)
+        C_Timer.After(1.0, function() if LP.optionsPanel and LP.optionsPanel.refresh then LP.optionsPanel.refresh() end end)
+    else
+        print(addonName .. ": Unable to open options panel.")
+    end
 end 

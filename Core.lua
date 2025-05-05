@@ -3,7 +3,7 @@ local addonName, addonTable = ...
 -- Create a namespace for the addon
 LossPunishment = LossPunishment or {}
 local LP = LossPunishment
-LP.Version = "0.1.11" -- Update version to match .toc file
+LP.Version = "0.1.12" -- Update version to match .toc file
 
 -- List of exercises
 LP.exercises = {

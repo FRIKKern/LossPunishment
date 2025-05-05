@@ -235,37 +235,51 @@ function LP:CycleExercise(direction)
         newIndex = 1
     end
     
-    -- Update displayed exercise
-    local newExercise = LP.exercises[newIndex]
-    LP.ExerciseFrame.exerciseText:SetText(newExercise)
-    LP.ExerciseFrame.currentExercise = newExercise
+    -- Get the base exercise
+    local baseExercise = LP.exercises[newIndex]
     
-    -- Update points tooltip when cycling
+    -- Get the current challenge level
     local currentLevel = LP.challengeLevels[LP.db.challengeLevel]
+    local repMultiplier = currentLevel.repMultiplier or 1.0
+    local pointMultiplier = currentLevel.pointMultiplier or 1.0
     
-    -- Calculate points for the new exercise
-    local exerciseType
-    local pointsText = "Points: "
-    
-    if string.find(newExercise, "Second Plank") then
+    -- Determine the exercise type and adjust the count based on challenge level
+    local exerciseType, originalCount
+    if string.find(baseExercise, "Second Plank") then
         exerciseType = "Plank"
-        local seconds = tonumber(string.match(newExercise, "(%d+) Second"))
-        local points = math.floor(seconds * LP.exerciseProperties[exerciseType].points * currentLevel.pointMultiplier)
-        pointsText = pointsText .. points .. " pts"
+        originalCount = 20 -- 20 seconds for Plank
     else
-        exerciseType = string.match(newExercise, "%d+ (.*)$")
-        if exerciseType and LP.exerciseProperties[exerciseType] then
-            local reps = tonumber(string.match(newExercise, "(%d+) "))
-            local points = math.floor(reps * LP.exerciseProperties[exerciseType].points * currentLevel.pointMultiplier)
-            pointsText = pointsText .. points .. " pts"
-        else
-            pointsText = pointsText .. "unknown"
-        end
+        exerciseType, originalCount = string.match(baseExercise, "(%d+) (.*)$")
+        originalCount = tonumber(exerciseType) -- The capture is flipped, exerciseType has the number
+        exerciseType = string.match(baseExercise, "%d+ (.*)$")
     end
     
+    -- Calculate adjusted count based on challenge level
+    local adjustedCount = math.floor(originalCount * repMultiplier)
+    if adjustedCount < 1 then adjustedCount = 1 end -- Ensure minimum of 1
+    
+    -- Format the exercise string with the adjusted count
+    local adjustedExercise
+    if exerciseType == "Plank" then
+        adjustedExercise = adjustedCount .. " Second Plank"
+    else
+        adjustedExercise = adjustedCount .. " " .. exerciseType
+    end
+    
+    -- Update displayed exercise
+    LP.ExerciseFrame.exerciseText:SetText(adjustedExercise)
+    LP.ExerciseFrame.currentExercise = adjustedExercise
+    
+    -- Calculate points for the new exercise
+    local basePoints = LP.exerciseProperties[exerciseType].points
+    local countMultiplier = (exerciseType == "Plank") and 20 or 10 -- Full set of reps or seconds
+    local pointsForExercise = math.floor(countMultiplier * basePoints * pointMultiplier)
+    
+    -- Update points tooltip
+    local pointsText = "Points: " .. pointsForExercise .. " pts"
     LP.ExerciseFrame.pointsValue:SetText(pointsText)
     
-    print(addonName .. ": Switched to exercise: " .. newExercise)
+    print(addonName .. ": Switched to exercise: " .. adjustedExercise)
 end
 
 -- Function to hide the exercise frame with a fade out animation

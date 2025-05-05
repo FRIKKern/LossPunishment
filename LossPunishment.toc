@@ -1,8 +1,8 @@
-## Interface: 100200
+## Interface: 111070
 ## Title: LossPunishment
 ## Notes: Records losses in battlegrounds and arenas and punishes you with exercises.
 ## Author: Frikk Jarl
-## Version: 0.1.14
+## Version: 0.1.15
 ## IconTexture: Interface\AddOns\LossPunishment\Logo.blp
 ## SavedVariables: LossPunishmentDB
 

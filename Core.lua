@@ -3,7 +3,7 @@ local addonName, addonTable = ...
 -- Create a namespace for the addon
 LossPunishment = LossPunishment or {}
 local LP = LossPunishment
-LP.Version = "0.1.8" -- Update version to match .toc file
+LP.Version = "0.1.9" -- Update version to match .toc file
 
 -- List of exercises
 LP.exercises = {
@@ -198,13 +198,24 @@ function LP:ProcessSlashCommand(msg)
         if LP.db and LP.db.stats then
             print(addonName .. " Exercise Stats:")
             local totalCompletions = 0
+            local totalPoints = 0
+            
+            -- Point values for each exercise type
+            local pointValues = {
+                Pushups = 4,  -- 4 points per push-up
+                Squats = 2,   -- 2 points per squat
+                Situps = 1    -- 1 point per sit-up
+            }
+            
             for exType, timestamps in pairs(LP.db.stats) do
                 local count = #timestamps
                 totalCompletions = totalCompletions + count
+                local points = count * 10 * (pointValues[exType] or 0)
+                totalPoints = totalPoints + points
                 local lastTime = count > 0 and timestamps[count] or "Never"
-                print(string.format("  - %s: %d (Last: %s)", exType, count, lastTime))
+                print(string.format("  - %s: %d reps (%d pts) (Last: %s)", exType, count * 10, points, lastTime))
             end
-            print("  Total Completions: " .. totalCompletions)
+            print("  Total: " .. totalCompletions * 10 .. " reps (" .. totalPoints .. " points)")
         else
             print(addonName .. ": Statistics data not found.")
         end

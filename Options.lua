@@ -46,10 +46,17 @@ end
 -- Function to calculate statistics for different time periods
 function LP:CalculateStats()
     local stats = {
-        today = { Pushups = 0, Squats = 0, Situps = 0, total = 0 },
-        week = { Pushups = 0, Squats = 0, Situps = 0, total = 0 },
-        month = { Pushups = 0, Squats = 0, Situps = 0, total = 0 },
-        allTime = { Pushups = 0, Squats = 0, Situps = 0, total = 0 }
+        today = { Pushups = 0, Squats = 0, Situps = 0, total = 0, points = 0 },
+        week = { Pushups = 0, Squats = 0, Situps = 0, total = 0, points = 0 },
+        month = { Pushups = 0, Squats = 0, Situps = 0, total = 0, points = 0 },
+        allTime = { Pushups = 0, Squats = 0, Situps = 0, total = 0, points = 0 }
+    }
+    
+    -- Point values for each exercise type
+    local pointValues = {
+        Pushups = 4,  -- 4 points per push-up
+        Squats = 2,   -- 2 points per squat
+        Situps = 1    -- 1 point per sit-up
     }
     
     -- Always return initialized stats even if no data exists yet
@@ -73,23 +80,27 @@ function LP:CalculateStats()
             -- All time
             stats.allTime[exType] = stats.allTime[exType] + 1
             stats.allTime.total = stats.allTime.total + 1
+            stats.allTime.points = stats.allTime.points + (pointValues[exType] or 0) * 10
             
             -- Today
             if LP:IsWithinTimePeriod(timestamp, "today") then
                 stats.today[exType] = stats.today[exType] + 1
                 stats.today.total = stats.today.total + 1
+                stats.today.points = stats.today.points + (pointValues[exType] or 0) * 10
             end
             
             -- This week
             if LP:IsWithinTimePeriod(timestamp, "week") then
                 stats.week[exType] = stats.week[exType] + 1
                 stats.week.total = stats.week.total + 1
+                stats.week.points = stats.week.points + (pointValues[exType] or 0) * 10
             end
             
             -- This month
             if LP:IsWithinTimePeriod(timestamp, "month") then
                 stats.month[exType] = stats.month[exType] + 1
                 stats.month.total = stats.month.total + 1
+                stats.month.points = stats.month.points + (pointValues[exType] or 0) * 10
             end
         end
     end
@@ -150,7 +161,7 @@ function LP:CreateHistoryWindow()
     local headerFrame = CreateFrame("Frame", "LossPunishmentHistoryHeaderFrame", window)
     headerFrame:SetPoint("TOPLEFT", filterFrame, "BOTTOMLEFT", 0, -5)
     headerFrame:SetSize(390, 25)
-    
+
     -- Headers
     local typeHeader = headerFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     typeHeader:SetPoint("TOPLEFT", headerFrame, "TOPLEFT", 15, 0)
@@ -158,12 +169,17 @@ function LP:CreateHistoryWindow()
     typeHeader:SetWidth(60)
     
     local exerciseHeader = headerFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    exerciseHeader:SetPoint("TOPLEFT", headerFrame, "TOPLEFT", 95, 0)
+    exerciseHeader:SetPoint("TOPLEFT", headerFrame, "TOPLEFT", 75, 0)
     exerciseHeader:SetText("Exercise")
     exerciseHeader:SetWidth(80)
     
+    local pointsHeader = headerFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    pointsHeader:SetPoint("TOPLEFT", headerFrame, "TOPLEFT", 160, 0)
+    pointsHeader:SetText("Points")
+    pointsHeader:SetWidth(50)
+    
     local dateHeader = headerFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    dateHeader:SetPoint("TOPLEFT", headerFrame, "TOPLEFT", 195, 0)
+    dateHeader:SetPoint("TOPLEFT", headerFrame, "TOPLEFT", 210, 0)
     dateHeader:SetText("Date & Time")
     dateHeader:SetWidth(140)
     
@@ -230,6 +246,13 @@ function LP:CreateHistoryWindow()
             scrollChild.rows = {}
         end
         
+        -- Point values for each exercise type
+        local pointValues = {
+            Pushups = 4,  -- 4 points per push-up
+            Squats = 2,   -- 2 points per squat
+            Situps = 1    -- 1 point per sit-up
+        }
+        
         -- Collect all entries based on filter
         local entries = {}
         
@@ -248,7 +271,8 @@ function LP:CreateHistoryWindow()
                     table.insert(entries, {
                         exType = exType,
                         timestamp = timestamp,
-                        index = i
+                        index = i,
+                        points = (pointValues[exType] or 0) * 10 -- Calculate points
                     })
                 end
             end
@@ -277,13 +301,19 @@ function LP:CreateHistoryWindow()
                 
                 -- Exercise Number
                 local numberText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-                numberText:SetPoint("LEFT", row, "LEFT", 90, 0)
+                numberText:SetPoint("LEFT", row, "LEFT", 75, 0)
                 numberText:SetWidth(80)
                 row.numberText = numberText
                 
+                -- Points
+                local pointsText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+                pointsText:SetPoint("LEFT", row, "LEFT", 160, 0)
+                pointsText:SetWidth(50)
+                row.pointsText = pointsText
+                
                 -- Timestamp
                 local timeText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-                timeText:SetPoint("LEFT", row, "LEFT", 190, 0)
+                timeText:SetPoint("LEFT", row, "LEFT", 210, 0)
                 timeText:SetWidth(140)
                 row.timeText = timeText
                 
@@ -303,6 +333,7 @@ function LP:CreateHistoryWindow()
             row:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -rowHeight * (i - 1))
             row.typeText:SetText(entry.exType)
             row.numberText:SetText("10 " .. entry.exType) -- Based on the standard format
+            row.pointsText:SetText(entry.points .. " pts")
             row.timeText:SetText(entry.timestamp)
         end
         
@@ -387,7 +418,7 @@ function LP:CreateOptionsPanel()
     local pushupsCheckbox = CreateFrame("CheckButton", "LossPunishmentPushupsCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
     pushupsCheckbox:SetPoint("TOPLEFT", exerciseSettingsTitle, "BOTTOMLEFT", 0, -10)
     pushupsCheckbox.text = _G[pushupsCheckbox:GetName() .. "Text"]
-    pushupsCheckbox.text:SetText("Enable Pushups")
+    pushupsCheckbox.text:SetText("Enable Pushups (4 pts per rep)")
     pushupsCheckbox:SetChecked(LP.db.enabledExercises.Pushups)
     pushupsCheckbox:SetScript("OnClick", function(self)
         LP.db.enabledExercises.Pushups = self:GetChecked()
@@ -398,7 +429,7 @@ function LP:CreateOptionsPanel()
     local squatsCheckbox = CreateFrame("CheckButton", "LossPunishmentSquatsCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
     squatsCheckbox:SetPoint("TOPLEFT", pushupsCheckbox, "BOTTOMLEFT", 0, -5)
     squatsCheckbox.text = _G[squatsCheckbox:GetName() .. "Text"]
-    squatsCheckbox.text:SetText("Enable Squats")
+    squatsCheckbox.text:SetText("Enable Squats (2 pts per rep)")
     squatsCheckbox:SetChecked(LP.db.enabledExercises.Squats)
     squatsCheckbox:SetScript("OnClick", function(self)
         LP.db.enabledExercises.Squats = self:GetChecked()
@@ -409,7 +440,7 @@ function LP:CreateOptionsPanel()
     local situpsCheckbox = CreateFrame("CheckButton", "LossPunishmentSitupsCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
     situpsCheckbox:SetPoint("TOPLEFT", squatsCheckbox, "BOTTOMLEFT", 0, -5)
     situpsCheckbox.text = _G[situpsCheckbox:GetName() .. "Text"]
-    situpsCheckbox.text:SetText("Enable Situps")
+    situpsCheckbox.text:SetText("Enable Situps (1 pt per rep)")
     situpsCheckbox:SetChecked(LP.db.enabledExercises.Situps)
     situpsCheckbox:SetScript("OnClick", function(self)
         LP.db.enabledExercises.Situps = self:GetChecked()
@@ -419,11 +450,18 @@ function LP:CreateOptionsPanel()
     -- Section Title: Statistics
     local statsTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     statsTitle:SetPoint("TOPLEFT", situpsCheckbox, "BOTTOMLEFT", 0, -20)
-    statsTitle:SetText("Exercise Statistics (Reps Completed)")
+    statsTitle:SetText("Exercise Statistics")
+    
+    -- Add point system explanation
+    local pointsExplanation = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    pointsExplanation:SetPoint("TOPLEFT", statsTitle, "BOTTOMLEFT", 0, -5)
+    pointsExplanation:SetText("(Push-ups = 4 pts, Squats = 2 pts, Sit-ups = 1 pt per rep)")
+    pointsExplanation:SetJustifyH("LEFT")
+    pointsExplanation:SetWidth(400)
     
     -- Statistics summary frame
     local statsFrame = CreateFrame("Frame", "LossPunishmentStatsFrame", panel, "InsetFrameTemplate")
-    statsFrame:SetPoint("TOPLEFT", statsTitle, "BOTTOMLEFT", 0, -10)
+    statsFrame:SetPoint("TOPLEFT", pointsExplanation, "BOTTOMLEFT", 0, -10)
     statsFrame:SetSize(400, 170) -- Reduced height as we're simplifying the display
     
     -- Create a grid background to help with alignment
@@ -458,8 +496,9 @@ function LP:CreateOptionsPanel()
         periodFontStrings[period] = periodHeader
     end
     
-    -- Exercise types
+    -- Exercise types with point values
     local exerciseTypes = {"Pushups", "Squats", "Situps"}
+    local exerciseLabels = {"Push-ups (4 pts)", "Squats (2 pts)", "Sit-ups (1 pt)"}
     local statsLabels = {}
     local statsValues = {}
     
@@ -467,9 +506,9 @@ function LP:CreateOptionsPanel()
         -- Create label
         statsLabels[i] = statsFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
         statsLabels[i]:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 20, -40 - (i-1) * 25)
-        statsLabels[i]:SetText(exType .. ":")
+        statsLabels[i]:SetText(exerciseLabels[i] .. ":")
         statsLabels[i]:SetJustifyH("LEFT")
-        statsLabels[i]:SetWidth(70)
+        statsLabels[i]:SetWidth(90)
         
         -- Create values for each time period
         statsValues[exType] = {}
@@ -488,9 +527,9 @@ function LP:CreateOptionsPanel()
                 elseif period == "This Month" then value = LP.cachedStats.month[exType] * 10
                 elseif period == "All Time" then value = LP.cachedStats.allTime[exType] * 10
                 end
-                valueText:SetText(value)
+                valueText:SetText(value .. " reps")
             else
-                valueText:SetText("0")
+                valueText:SetText("0 reps")
             end
         end
         
@@ -512,9 +551,9 @@ function LP:CreateOptionsPanel()
     -- Total row
     local totalLabel = statsFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     totalLabel:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 20, -75 - (#exerciseTypes-1) * 25)
-    totalLabel:SetText("TOTAL:")
+    totalLabel:SetText("TOTAL POINTS:")
     totalLabel:SetJustifyH("LEFT")
-    totalLabel:SetWidth(70)
+    totalLabel:SetWidth(90)
     
     -- Total values for each period
     local totalValues = {}
@@ -528,14 +567,14 @@ function LP:CreateOptionsPanel()
         -- Set initial total values from cache
         if LP.cachedStats then
             local value = 0
-            if period == "Today" then value = LP.cachedStats.today.total * 10
-            elseif period == "This Week" then value = LP.cachedStats.week.total * 10
-            elseif period == "This Month" then value = LP.cachedStats.month.total * 10
-            elseif period == "All Time" then value = LP.cachedStats.allTime.total * 10
+            if period == "Today" then value = LP.cachedStats.today.points
+            elseif period == "This Week" then value = LP.cachedStats.week.points
+            elseif period == "This Month" then value = LP.cachedStats.month.points
+            elseif period == "All Time" then value = LP.cachedStats.allTime.points
             end
-            valueText:SetText(value)
+            valueText:SetText(value .. " pts")
         else
-            valueText:SetText("0")
+            valueText:SetText("0 pts")
         end
     end
     
@@ -580,13 +619,13 @@ function LP:CreateOptionsPanel()
         local stats = LP:CalculateStats()
         LP.cachedStats = stats -- Update the cache
         
-        -- Exercise counts - show only the total reps (sessions * 10)
+        -- Exercise counts - show in reps
         for i, exType in ipairs(panel.exerciseTypes) do
             if panel.statsValues[exType] then
-                panel.statsValues[exType]["Today"]:SetText(stats.today[exType] * 10)
-                panel.statsValues[exType]["This Week"]:SetText(stats.week[exType] * 10)
-                panel.statsValues[exType]["This Month"]:SetText(stats.month[exType] * 10)
-                panel.statsValues[exType]["All Time"]:SetText(stats.allTime[exType] * 10)
+                panel.statsValues[exType]["Today"]:SetText(stats.today[exType] * 10 .. " reps")
+                panel.statsValues[exType]["This Week"]:SetText(stats.week[exType] * 10 .. " reps")
+                panel.statsValues[exType]["This Month"]:SetText(stats.month[exType] * 10 .. " reps")
+                panel.statsValues[exType]["All Time"]:SetText(stats.allTime[exType] * 10 .. " reps")
                 LP:DebugPrint("Set " .. exType .. " stats: " .. 
                              (stats.today[exType] * 10) .. " today, " ..
                              (stats.week[exType] * 10) .. " week, " ..
@@ -597,17 +636,17 @@ function LP:CreateOptionsPanel()
             end
         end
         
-        -- Total exercises (sessions * 10)
+        -- Total exercises in points
         if panel.totalValues then
-            panel.totalValues["Today"]:SetText(stats.today.total * 10)
-            panel.totalValues["This Week"]:SetText(stats.week.total * 10)
-            panel.totalValues["This Month"]:SetText(stats.month.total * 10)
-            panel.totalValues["All Time"]:SetText(stats.allTime.total * 10)
-            LP:DebugPrint("Set total stats: " .. 
-                         (stats.today.total * 10) .. " today, " ..
-                         (stats.week.total * 10) .. " week, " ..
-                         (stats.month.total * 10) .. " month, " ..
-                         (stats.allTime.total * 10) .. " all time")
+            panel.totalValues["Today"]:SetText(stats.today.points .. " pts")
+            panel.totalValues["This Week"]:SetText(stats.week.points .. " pts")
+            panel.totalValues["This Month"]:SetText(stats.month.points .. " pts")
+            panel.totalValues["All Time"]:SetText(stats.allTime.points .. " pts")
+            LP:DebugPrint("Set total points: " .. 
+                         stats.today.points .. " today, " ..
+                         stats.week.points .. " week, " ..
+                         stats.month.points .. " month, " ..
+                         stats.allTime.points .. " all time")
         else
             LP:DebugPrint("Missing totalValues")
         end

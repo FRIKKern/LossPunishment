@@ -52,12 +52,12 @@ function LP:CalculateStats()
         allTime = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0 }
     }
     
-    -- Point values for each exercise type
+    -- Point values for each exercise type (per rep)
     local pointValues = {
-        Pushups = 4,  -- 4 points per push-up
-        Squats = 2,   -- 2 points per squat
-        Situps = 1,   -- 1 point per sit-up
-        Plank = 3     -- 3 points per plank
+        Pushups = 4,  -- 4 points per push-up, 40 per set of 10
+        Squats = 2,   -- 2 points per squat, 20 per set of 10
+        Situps = 1,   -- 1 point per sit-up, 10 per set of 10
+        Plank = 3     -- 3 points per plank second, 60 per 20 seconds
     }
     
     -- Always return initialized stats even if no data exists yet
@@ -78,35 +78,56 @@ function LP:CalculateStats()
                  #LP.db.stats.Situps .. " situps, " ..
                  #LP.db.stats.Plank .. " planks")
     
-    for exType, timestamps in pairs(LP.db.stats) do
-        for _, timestamp in ipairs(timestamps) do
+    for exType, entries in pairs(LP.db.stats) do
+        for _, entry in ipairs(entries) do
+            -- Handle both old (string timestamp) and new (table with timestamp and challenge level) formats
+            local timestamp, challengeLevel
+            
+            if type(entry) == "table" then
+                timestamp = entry.timestamp
+                challengeLevel = entry.challengeLevel or 2 -- Default to Challenger if not set
+            else
+                -- Legacy format (just a timestamp string)
+                timestamp = entry
+                challengeLevel = 2 -- Default to Challenger for old data
+            end
+            
             -- Determine the multiplier based on exercise type
-            local multiplier = (exType == "Plank") and 1 or 10  -- Plank is already per unit, others are counted in sets of 10
+            local countMultiplier = (exType == "Plank") and 20 or 10  -- Full set of reps or seconds
+            
+            -- Get point multiplier from challenge level
+            local pointMultiplier = 1.0
+            if challengeLevel and LP.challengeLevels[challengeLevel] then
+                pointMultiplier = LP.challengeLevels[challengeLevel].pointMultiplier
+            end
+            
+            -- Calculate total points for this entry
+            local entryPoints = pointValues[exType] * countMultiplier * pointMultiplier
             
             -- All time
             stats.allTime[exType] = stats.allTime[exType] + 1
             stats.allTime.total = stats.allTime.total + 1
-            stats.allTime.points = stats.allTime.points + (pointValues[exType] or 0) * multiplier
+            stats.allTime.points = stats.allTime.points + entryPoints
             
             -- Today
             if LP:IsWithinTimePeriod(timestamp, "today") then
                 stats.today[exType] = stats.today[exType] + 1
                 stats.today.total = stats.today.total + 1
-                stats.today.points = stats.today.points + (pointValues[exType] or 0) * multiplier
+                stats.today.points = stats.today.points + entryPoints
             end
             
             -- This week
             if LP:IsWithinTimePeriod(timestamp, "week") then
                 stats.week[exType] = stats.week[exType] + 1
                 stats.week.total = stats.week.total + 1
-                stats.week.points = stats.week.points + (pointValues[exType] or 0) * multiplier
+                stats.week.points = stats.week.points + entryPoints
             end
             
             -- This month
             if LP:IsWithinTimePeriod(timestamp, "month") then
                 stats.month[exType] = stats.month[exType] + 1
                 stats.month.total = stats.month.total + 1
-                stats.month.points = stats.month.points + (pointValues[exType] or 0) * multiplier
+                stats.month.points = stats.month.points + entryPoints
             end
         end
     end
@@ -258,12 +279,12 @@ function LP:CreateHistoryWindow()
             scrollChild.rows = {}
         end
         
-        -- Point values for each exercise type
+        -- Point values for each exercise type (for full sets)
         local pointValues = {
-            Pushups = 4,  -- 4 points per push-up
-            Squats = 2,   -- 2 points per squat
-            Situps = 1,   -- 1 point per sit-up
-            Plank = 3     -- 3 points per plank
+            Pushups = 4,  -- 4 points per push-up, 40 per set of 10
+            Squats = 2,   -- 2 points per squat, 20 per set of 10
+            Situps = 1,   -- 1 point per sit-up, 10 per set of 10
+            Plank = 3     -- 3 points per plank second, 60 per 20 seconds
         }
         
         -- Collect all entries based on filter
@@ -278,19 +299,45 @@ function LP:CreateHistoryWindow()
             LP.db.stats = { Pushups = {}, Squats = {}, Situps = {}, Plank = {} }
         end
         
-        for exType, timestamps in pairs(LP.db.stats) do
+        for exType, records in pairs(LP.db.stats) do
             if filter == "All" or filter == exType then
-                for i, timestamp in ipairs(timestamps) do
+                for i, record in ipairs(records) do
+                    -- Handle both old (string timestamp) and new (table with timestamp and challenge level) formats
+                    local timestamp, challengeLevel
+                    
+                    if type(record) == "table" then
+                        timestamp = record.timestamp
+                        challengeLevel = record.challengeLevel or 2 -- Default to Challenger if not set
+                    else
+                        -- Legacy format (just a timestamp string)
+                        timestamp = record
+                        challengeLevel = 2 -- Default to Challenger for old data
+                    end
+                    
                     -- Determine if the exercise is measured in time or reps
                     local isTimeBased = (exType == "Plank")
-                    local multiplier = isTimeBased and 1 or 10
+                    local countMultiplier = isTimeBased and 20 or 10  -- Base multiplier for a full set
+                    
+                    -- Get point multiplier from challenge level
+                    local pointMultiplier = 1.0
+                    if LP.challengeLevels[challengeLevel] then
+                        pointMultiplier = LP.challengeLevels[challengeLevel].pointMultiplier
+                    end
+                    
+                    -- Calculate display values
+                    local displayCount = isTimeBased and 20 or 10 -- Base counts
+                    if LP.challengeLevels[challengeLevel] then
+                        displayCount = math.floor(displayCount * LP.challengeLevels[challengeLevel].repMultiplier)
+                    end
                     
                     table.insert(entries, {
                         exType = exType,
                         timestamp = timestamp,
                         index = i,
                         isTimeBased = isTimeBased,
-                        points = (pointValues[exType] or 0) * multiplier -- Calculate points
+                        challengeLevel = challengeLevel,
+                        displayCount = displayCount,
+                        points = pointValues[exType] * countMultiplier * pointMultiplier -- Calculate points with challenge multiplier
                     })
                 end
             end
@@ -349,16 +396,40 @@ function LP:CreateHistoryWindow()
             local row = scrollChild.rows[i]
             row:Show()
             row:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -rowHeight * (i - 1))
-            row.typeText:SetText(entry.exType)
             
-            -- Display either reps or seconds based on exercise type
-            if entry.isTimeBased then
-                row.numberText:SetText("20 Seconds " .. entry.exType)
-            else
-                row.numberText:SetText("10 " .. entry.exType)
+            -- Show challenge level in the exercise type column with better formatting
+            local challengeLevel = LP.challengeLevels[entry.challengeLevel]
+            local challengeNameShort = challengeLevel.name:sub(1,1)
+            local challengeColor = "|cFF"
+            
+            -- Set a color based on challenge level (increasing brightness for higher levels)
+            if entry.challengeLevel == 1 then -- Rookie
+                challengeColor = "|cFF999999" -- Gray
+            elseif entry.challengeLevel == 2 then -- Challenger
+                challengeColor = "|cFFFFFFFF" -- White
+            elseif entry.challengeLevel == 3 then -- Rival
+                challengeColor = "|cFF00FF00" -- Green
+            elseif entry.challengeLevel == 4 then -- Duelist
+                challengeColor = "|cFF00AAFF" -- Blue
+            elseif entry.challengeLevel == 5 then -- Elite
+                challengeColor = "|cFFAA00FF" -- Purple
+            elseif entry.challengeLevel == 6 then -- Gladiator
+                challengeColor = "|cFFFF9900" -- Orange
+            elseif entry.challengeLevel == 7 then -- Champion
+                challengeColor = "|cFFFF0000" -- Red
             end
             
-            row.pointsText:SetText(entry.points .. " pts")
+            row.typeText:SetText(challengeColor .. "[" .. challengeNameShort .. "] |r" .. entry.exType)
+            
+            -- Display either reps or seconds based on exercise type - use the actual count from when completed
+            if entry.isTimeBased then
+                row.numberText:SetText(entry.displayCount .. " Seconds")
+            else
+                row.numberText:SetText(entry.displayCount .. " reps")
+            end
+            
+            -- Show points with the multiplier from that challenge level
+            row.pointsText:SetText(challengeColor .. math.floor(entry.points) .. " pts|r")
             row.timeText:SetText(entry.timestamp)
         end
         
@@ -441,11 +512,47 @@ function LP:CreateOptionsPanel()
     exerciseSettingsTitle:SetPoint("TOPLEFT", description, "BOTTOMLEFT", 0, -20)
     exerciseSettingsTitle:SetText("Exercise Settings")
     
+    -- Helper function to create dynamic checkbox labels
+    local function GetCheckboxLabel(exerciseType, basePoints, unit, count)
+        local currentLevel = LP.challengeLevels[LP.db.challengeLevel]
+        local pointMultiplier = currentLevel.pointMultiplier
+        local repMultiplier = currentLevel.repMultiplier
+        
+        -- Calculate adjusted points and reps based on challenge level
+        local adjustedPoints = math.floor(basePoints * count * pointMultiplier)
+        local adjustedCount = math.floor(count * repMultiplier)
+        if adjustedCount < 1 then adjustedCount = 1 end -- Ensure minimum of 1
+        
+        -- Choose a color based on challenge level (brighter colors for higher levels)
+        local pointColor = "|cFFFFFFFF" -- Default white
+        
+        if LP.db.challengeLevel == 1 then -- Combatant
+            pointColor = "|cFF999999" -- Gray
+        elseif LP.db.challengeLevel == 2 then -- Challenger
+            pointColor = "|cFFFFFFFF" -- White
+        elseif LP.db.challengeLevel == 3 then -- Rival
+            pointColor = "|cFF00FF00" -- Green
+        elseif LP.db.challengeLevel == 4 then -- Duelist
+            pointColor = "|cFF00AAFF" -- Blue
+        elseif LP.db.challengeLevel == 5 then -- Elite
+            pointColor = "|cFFAA00FF" -- Purple
+        elseif LP.db.challengeLevel == 6 then -- Gladiator
+            pointColor = "|cFFFF9900" -- Orange
+        elseif LP.db.challengeLevel == 7 then -- Champion
+            pointColor = "|cFFFF0000" -- Red
+        end
+        
+        return string.format("Enable %s (%s%d|r pts per set of %s%d%s|r)", 
+            exerciseType, 
+            pointColor, adjustedPoints, 
+            pointColor, adjustedCount, unit)
+    end
+    
     -- Pushups checkbox
     local pushupsCheckbox = CreateFrame("CheckButton", "LossPunishmentPushupsCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
     pushupsCheckbox:SetPoint("TOPLEFT", exerciseSettingsTitle, "BOTTOMLEFT", 0, -10)
     pushupsCheckbox.text = _G[pushupsCheckbox:GetName() .. "Text"]
-    pushupsCheckbox.text:SetText("Enable Pushups (4 pts per rep)")
+    pushupsCheckbox.text:SetText(GetCheckboxLabel("Pushups", 4, "", 10))
     pushupsCheckbox:SetChecked(LP.db.enabledExercises.Pushups)
     pushupsCheckbox:SetScript("OnClick", function(self)
         LP.db.enabledExercises.Pushups = self:GetChecked()
@@ -456,7 +563,7 @@ function LP:CreateOptionsPanel()
     local squatsCheckbox = CreateFrame("CheckButton", "LossPunishmentSquatsCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
     squatsCheckbox:SetPoint("TOPLEFT", pushupsCheckbox, "BOTTOMLEFT", 0, -5)
     squatsCheckbox.text = _G[squatsCheckbox:GetName() .. "Text"]
-    squatsCheckbox.text:SetText("Enable Squats (2 pts per rep)")
+    squatsCheckbox.text:SetText(GetCheckboxLabel("Squats", 2, "", 10))
     squatsCheckbox:SetChecked(LP.db.enabledExercises.Squats)
     squatsCheckbox:SetScript("OnClick", function(self)
         LP.db.enabledExercises.Squats = self:GetChecked()
@@ -467,7 +574,7 @@ function LP:CreateOptionsPanel()
     local situpsCheckbox = CreateFrame("CheckButton", "LossPunishmentSitupsCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
     situpsCheckbox:SetPoint("TOPLEFT", squatsCheckbox, "BOTTOMLEFT", 0, -5)
     situpsCheckbox.text = _G[situpsCheckbox:GetName() .. "Text"]
-    situpsCheckbox.text:SetText("Enable Situps (1 pt per rep)")
+    situpsCheckbox.text:SetText(GetCheckboxLabel("Situps", 1, "", 10))
     situpsCheckbox:SetChecked(LP.db.enabledExercises.Situps)
     situpsCheckbox:SetScript("OnClick", function(self)
         LP.db.enabledExercises.Situps = self:GetChecked()
@@ -478,22 +585,118 @@ function LP:CreateOptionsPanel()
     local plankCheckbox = CreateFrame("CheckButton", "LossPunishmentPlankCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
     plankCheckbox:SetPoint("TOPLEFT", situpsCheckbox, "BOTTOMLEFT", 0, -5)
     plankCheckbox.text = _G[plankCheckbox:GetName() .. "Text"]
-    plankCheckbox.text:SetText("Enable Plank (3 pts per 20 seconds)")
+    plankCheckbox.text:SetText(GetCheckboxLabel("Plank", 3, " seconds", 20))
     plankCheckbox:SetChecked(LP.db.enabledExercises.Plank)
     plankCheckbox:SetScript("OnClick", function(self)
         LP.db.enabledExercises.Plank = self:GetChecked()
         LP:UpdateExercisesList()
     end)
     
+    -- Challenge Level Dropdown
+    local challengeLevelTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    challengeLevelTitle:SetPoint("TOPLEFT", plankCheckbox, "BOTTOMLEFT", 0, -20)
+    challengeLevelTitle:SetText("Challenge Level")
+    
+    -- Create challenge level dropdown to select different difficulty levels
+    local challengeLevelDropdown = CreateFrame("Frame", "LossPunishmentChallengeLevelDropdown", panel, "UIDropDownMenuTemplate")
+    challengeLevelDropdown:SetPoint("TOPLEFT", challengeLevelTitle, "BOTTOMLEFT", -15, -5)
+    
+    -- More detailed challenge level description
+    local challengeLevelDesc = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    challengeLevelDesc:SetPoint("TOPLEFT", challengeLevelDropdown, "BOTTOMLEFT", 20, -5)
+    challengeLevelDesc:SetText("Higher challenge levels increase reps/seconds but award exponentially more points! Points are awarded based on your challenge level at the time of completion, not your current level.")
+    challengeLevelDesc:SetJustifyH("LEFT")
+    challengeLevelDesc:SetWidth(400)
+    
+    -- Initialize the dropdown
+    local function InitializeChallengeDropdown(self, level)
+        local info = UIDropDownMenu_CreateInfo()
+        
+        for i, challengeLevel in ipairs(LP.challengeLevels) do
+            info.text = challengeLevel.name .. " (" .. 
+                       (challengeLevel.repMultiplier * 100) .. "% reps, " .. 
+                       (challengeLevel.pointMultiplier * 100) .. "% points)"
+            info.value = i
+            info.func = function(self)
+                -- Set the challenge level in the database
+                LP.db.challengeLevel = self.value
+                -- Update the dropdown text
+                UIDropDownMenu_SetText(challengeLevelDropdown, self:GetText())
+                
+                -- Refresh the stats panel and checkboxes
+                if panel.refresh then
+                    panel.refresh()
+                end
+                
+                -- Also update the exercise list to reflect the new challenge level
+                LP:UpdateExercisesList()
+            end
+            info.checked = (i == LP.db.challengeLevel)
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end
+    
+    UIDropDownMenu_Initialize(challengeLevelDropdown, InitializeChallengeDropdown)
+    UIDropDownMenu_SetWidth(challengeLevelDropdown, 250)
+    UIDropDownMenu_SetButtonWidth(challengeLevelDropdown, 250)
+    UIDropDownMenu_JustifyText(challengeLevelDropdown, "LEFT")
+    UIDropDownMenu_SetText(challengeLevelDropdown, LP.challengeLevels[LP.db.challengeLevel].name .. 
+                          " (" .. (LP.challengeLevels[LP.db.challengeLevel].repMultiplier * 100) .. "% reps, " .. 
+                          (LP.challengeLevels[LP.db.challengeLevel].pointMultiplier * 100) .. "% points)")
+    
     -- Section Title: Statistics
     local statsTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    statsTitle:SetPoint("TOPLEFT", plankCheckbox, "BOTTOMLEFT", 0, -20)
+    statsTitle:SetPoint("TOPLEFT", challengeLevelDesc, "BOTTOMLEFT", -20, -20)
     statsTitle:SetText("Exercise Statistics")
     
-    -- Add point system explanation
+    -- Add point system explanation with dynamic values
+    local function GetPointsExplanationText()
+        local currentLevel = LP.challengeLevels[LP.db.challengeLevel]
+        local pointMultiplier = currentLevel.pointMultiplier
+        local repMultiplier = currentLevel.repMultiplier
+        
+        -- Calculate adjusted counts
+        local pushupCount = math.floor(10 * repMultiplier)
+        local squatCount = math.floor(10 * repMultiplier)
+        local situpCount = math.floor(10 * repMultiplier)
+        local plankCount = math.floor(20 * repMultiplier)
+        
+        if pushupCount < 1 then pushupCount = 1 end
+        if squatCount < 1 then squatCount = 1 end
+        if situpCount < 1 then situpCount = 1 end
+        if plankCount < 1 then plankCount = 1 end
+        
+        -- Choose a color based on challenge level (brighter colors for higher levels)
+        local pointColor = "|cFFFFFFFF" -- Default white
+        
+        if LP.db.challengeLevel == 1 then -- Combatant
+            pointColor = "|cFF999999" -- Gray
+        elseif LP.db.challengeLevel == 2 then -- Challenger
+            pointColor = "|cFFFFFFFF" -- White
+        elseif LP.db.challengeLevel == 3 then -- Rival
+            pointColor = "|cFF00FF00" -- Green
+        elseif LP.db.challengeLevel == 4 then -- Duelist
+            pointColor = "|cFF00AAFF" -- Blue
+        elseif LP.db.challengeLevel == 5 then -- Elite
+            pointColor = "|cFFAA00FF" -- Purple
+        elseif LP.db.challengeLevel == 6 then -- Gladiator
+            pointColor = "|cFFFF9900" -- Orange
+        elseif LP.db.challengeLevel == 7 then -- Champion
+            pointColor = "|cFFFF0000" -- Red
+        end
+        
+        return string.format(
+            "(Push-ups: %s%d|r pts for %s%d|r reps, Squats: %s%d|r pts for %s%d|r reps, Sit-ups: %s%d|r pts for %s%d|r reps, Plank: %s%d|r pts for %s%d|r seconds)",
+            pointColor, math.floor(40 * pointMultiplier), pointColor, pushupCount,
+            pointColor, math.floor(20 * pointMultiplier), pointColor, squatCount,
+            pointColor, math.floor(10 * pointMultiplier), pointColor, situpCount,
+            pointColor, math.floor(60 * pointMultiplier), pointColor, plankCount
+        )
+    end
+    
     local pointsExplanation = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     pointsExplanation:SetPoint("TOPLEFT", statsTitle, "BOTTOMLEFT", 0, -5)
-    pointsExplanation:SetText("(Push-ups = 4 pts, Squats = 2 pts, Sit-ups = 1 pt per rep, Plank = 3 pts per 20 sec)")
+    pointsExplanation:SetText(GetPointsExplanationText())
     pointsExplanation:SetJustifyH("LEFT")
     pointsExplanation:SetWidth(400)
     
@@ -536,7 +739,7 @@ function LP:CreateOptionsPanel()
     
     -- Exercise types with point values
     local exerciseTypes = {"Pushups", "Squats", "Situps", "Plank"}
-    local exerciseLabels = {"Push-ups (4 pts)", "Squats (2 pts)", "Sit-ups (1 pt)", "Plank (3 pts)"}
+    local exerciseLabels = {"Push-ups (40 pts)", "Squats (20 pts)", "Sit-ups (10 pts)", "Plank (60 pts)"}
     local statsLabels = {}
     local statsValues = {}
     
@@ -644,6 +847,7 @@ function LP:CreateOptionsPanel()
     panel.squatsCheckbox = squatsCheckbox
     panel.situpsCheckbox = situpsCheckbox
     panel.plankCheckbox = plankCheckbox
+    panel.pointsExplanation = pointsExplanation
     
     -- Panel refresh function
     panel.refresh = function()
@@ -654,6 +858,15 @@ function LP:CreateOptionsPanel()
         panel.squatsCheckbox:SetChecked(LP.db.enabledExercises.Squats)
         panel.situpsCheckbox:SetChecked(LP.db.enabledExercises.Situps)
         panel.plankCheckbox:SetChecked(LP.db.enabledExercises.Plank)
+        
+        -- Update checkbox labels with current challenge level point values
+        panel.pushupsCheckbox.text:SetText(GetCheckboxLabel("Pushups", 4, "", 10))
+        panel.squatsCheckbox.text:SetText(GetCheckboxLabel("Squats", 2, "", 10))
+        panel.situpsCheckbox.text:SetText(GetCheckboxLabel("Situps", 1, "", 10))
+        panel.plankCheckbox.text:SetText(GetCheckboxLabel("Plank", 3, " seconds", 20))
+        
+        -- Update points explanation with current challenge level values
+        panel.pointsExplanation:SetText(GetPointsExplanationText())
         
         -- Calculate stats for all time periods
         local stats = LP:CalculateStats()
@@ -666,6 +879,7 @@ function LP:CreateOptionsPanel()
                 local unit = isTimeBased and " sec" or " reps"
                 local multiplier = isTimeBased and 20 or 10
                 
+                -- Display actual historical stats, not adjusted by current challenge level
                 panel.statsValues[exType]["Today"]:SetText(stats.today[exType] * multiplier .. unit)
                 panel.statsValues[exType]["This Week"]:SetText(stats.week[exType] * multiplier .. unit)
                 panel.statsValues[exType]["This Month"]:SetText(stats.month[exType] * multiplier .. unit)

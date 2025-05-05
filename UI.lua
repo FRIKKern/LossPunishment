@@ -46,6 +46,20 @@ function LP:CreateExerciseFrame()
     frame.title:SetPoint("TOP", frame.TitleBg, "TOP", 0, -5)
     frame.title:SetText("Loss Punishment")
 
+    -- Add challenge level display
+    frame.challengeLevel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.challengeLevel:SetPoint("TOPRIGHT", frame.InsetBg, "TOPRIGHT", -10, -10)
+    frame.challengeLevel:SetJustifyH("RIGHT")
+    frame.challengeLevel:SetTextColor(0.8, 0.8, 0.2) -- Gold color
+    frame.challengeLevel:SetText("Challenge Level: Loading...")
+    
+    -- Points value display
+    frame.pointsValue = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.pointsValue:SetPoint("TOP", frame.challengeLevel, "BOTTOM", 0, -2)
+    frame.pointsValue:SetJustifyH("RIGHT")
+    frame.pointsValue:SetTextColor(0, 0.8, 0) -- Green color
+    frame.pointsValue:SetText("Points: --")
+
     -- Left Arrow Button
     frame.leftArrow = CreateFrame("Button", "LossPunishmentLeftArrow", frame)
     frame.leftArrow:SetSize(24, 24)
@@ -155,6 +169,32 @@ function LP:ShowExercisePrompt(exerciseText, instanceType)
             LP.ExerciseFrame.notificationText:SetText("Time for an exercise!")
         end
         
+        -- Update challenge level and points information
+        local currentLevel = LP.challengeLevels[LP.db.challengeLevel]
+        LP.ExerciseFrame.challengeLevel:SetText("Challenge Level: " .. currentLevel.name)
+        
+        -- Calculate points for this exercise
+        local exerciseType
+        local pointsText = "Points: "
+        
+        if string.find(displayString, "Second Plank") then
+            exerciseType = "Plank"
+            local seconds = tonumber(string.match(displayString, "(%d+) Second"))
+            local points = math.floor(seconds * LP.exerciseProperties[exerciseType].points * currentLevel.pointMultiplier)
+            pointsText = pointsText .. points .. " pts"
+        else
+            exerciseType = string.match(displayString, "%d+ (.*)$")
+            if exerciseType and LP.exerciseProperties[exerciseType] then
+                local reps = tonumber(string.match(displayString, "(%d+) "))
+                local points = math.floor(reps * LP.exerciseProperties[exerciseType].points * currentLevel.pointMultiplier)
+                pointsText = pointsText .. points .. " pts"
+            else
+                pointsText = pointsText .. "unknown"
+            end
+        end
+        
+        LP.ExerciseFrame.pointsValue:SetText(pointsText)
+        
         -- Play a sound to get attention
         PlaySound(SOUNDKIT.READY_CHECK)
         
@@ -199,6 +239,31 @@ function LP:CycleExercise(direction)
     local newExercise = LP.exercises[newIndex]
     LP.ExerciseFrame.exerciseText:SetText(newExercise)
     LP.ExerciseFrame.currentExercise = newExercise
+    
+    -- Update points tooltip when cycling
+    local currentLevel = LP.challengeLevels[LP.db.challengeLevel]
+    
+    -- Calculate points for the new exercise
+    local exerciseType
+    local pointsText = "Points: "
+    
+    if string.find(newExercise, "Second Plank") then
+        exerciseType = "Plank"
+        local seconds = tonumber(string.match(newExercise, "(%d+) Second"))
+        local points = math.floor(seconds * LP.exerciseProperties[exerciseType].points * currentLevel.pointMultiplier)
+        pointsText = pointsText .. points .. " pts"
+    else
+        exerciseType = string.match(newExercise, "%d+ (.*)$")
+        if exerciseType and LP.exerciseProperties[exerciseType] then
+            local reps = tonumber(string.match(newExercise, "(%d+) "))
+            local points = math.floor(reps * LP.exerciseProperties[exerciseType].points * currentLevel.pointMultiplier)
+            pointsText = pointsText .. points .. " pts"
+        else
+            pointsText = pointsText .. "unknown"
+        end
+    end
+    
+    LP.ExerciseFrame.pointsValue:SetText(pointsText)
     
     print(addonName .. ": Switched to exercise: " .. newExercise)
 end

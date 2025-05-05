@@ -3,7 +3,7 @@ local addonName, addonTable = ...
 -- Create a namespace for the addon
 LossPunishment = LossPunishment or {}
 local LP = LossPunishment
-LP.Version = "0.1.10" -- Update version to match .toc file
+LP.Version = "0.1.11" -- Update version to match .toc file
 
 -- List of exercises
 LP.exercises = {
@@ -15,10 +15,49 @@ LP.exercises = {
 
 -- Exercise types and their properties
 LP.exerciseProperties = {
-    Pushups = { isTimeBased = false, count = 10, points = 4 },
-    Squats = { isTimeBased = false, count = 10, points = 2 },
-    Situps = { isTimeBased = false, count = 10, points = 1 },
-    Plank = { isTimeBased = true, count = 20, points = 3 }
+    Pushups = { isTimeBased = false, count = 10, points = 4 }, -- 4 pts per push-up = 40 pts per set
+    Squats = { isTimeBased = false, count = 10, points = 2 },  -- 2 pts per squat = 20 pts per set
+    Situps = { isTimeBased = false, count = 10, points = 1 },  -- 1 pt per sit-up = 10 pts per set
+    Plank = { isTimeBased = true, count = 20, points = 3 }     -- 3 pts per second = 60 pts per 20 sec
+}
+
+-- Challenge levels with multipliers for difficulty and points
+LP.challengeLevels = {
+    {
+        name = "Combatant",
+        repMultiplier = 0.5,  -- 50% of normal reps/seconds
+        pointMultiplier = 0.5 -- 50% of normal points
+    },
+    {
+        name = "Challenger", -- Default
+        repMultiplier = 1.0,  -- 100% (normal reps/seconds)
+        pointMultiplier = 1.0 -- 100% (normal points)
+    },
+    {
+        name = "Rival",
+        repMultiplier = 1.5,  -- 150% of normal reps/seconds
+        pointMultiplier = 2.0 -- 200% of normal points (exponential increase)
+    },
+    {
+        name = "Duelist",
+        repMultiplier = 2.0,  -- 200% of normal reps/seconds
+        pointMultiplier = 3.0 -- 300% of normal points
+    },
+    {
+        name = "Elite",
+        repMultiplier = 2.5,  -- 250% of normal reps/seconds
+        pointMultiplier = 4.0 -- 400% of normal points
+    },
+    {
+        name = "Gladiator",
+        repMultiplier = 3.0,  -- 300% of normal reps/seconds
+        pointMultiplier = 5.0 -- 500% of normal points
+    },
+    {
+        name = "Rank 1",
+        repMultiplier = 4.0,  -- 400% of normal reps/seconds
+        pointMultiplier = 8.0 -- 800% of normal points (very exponential)
+    }
 }
 
 -- Database for storing loss records (will be loaded from SavedVariables)
@@ -71,6 +110,8 @@ function LP:Initialize()
                 Situps = true,
                 Plank = true
             },
+            -- Challenge level setting (default: 2 = Challenger)
+            challengeLevel = 2,
             debugMode = false -- Debug mode off by default
         }
         LossPunishmentDB = LP.db -- Assign to global for saving
@@ -94,6 +135,11 @@ function LP:Initialize()
 
     -- Add Plank to enabled exercises if it doesn't exist (for backward compatibility)
     LP.db.enabledExercises.Plank = LP.db.enabledExercises.Plank ~= nil and LP.db.enabledExercises.Plank or true
+
+    -- Ensure challenge level exists (for backward compatibility)
+    if LP.db.challengeLevel == nil then
+        LP.db.challengeLevel = 2 -- Default to Challenger
+    end
 
     -- Update exercises list based on enabled settings
     LP:UpdateExercisesList()
@@ -150,8 +196,34 @@ function LP:RecordExerciseCompletion(exerciseText)
     
     if exerciseType and LP.db.stats[exerciseType] then
         local timestamp = date("%Y-%m-%d %H:%M:%S") -- Get current date and time
-        table.insert(LP.db.stats[exerciseType], timestamp) -- Add timestamp to the list
-        LP:DebugPrint("Recorded completion for", exerciseType, "at", timestamp, "Total:", #LP.db.stats[exerciseType])
+        
+        -- Store completion with the CURRENT challenge level at time of completion
+        -- This ensures points are awarded based on the difficulty setting when completed
+        local entry = {
+            timestamp = timestamp,
+            challengeLevel = LP.db.challengeLevel -- Store current challenge level
+        }
+
+        -- This challenge level is used when calculating points in the stats displays
+        -- Points are LOCKED at the time of completion and won't change if user changes challenge level later
+        
+        table.insert(LP.db.stats[exerciseType], entry) -- Add entry to the list
+        
+        -- Calculate and display points earned for this completion
+        local currentLevel = LP.challengeLevels[LP.db.challengeLevel]
+        local isTimeBased = (exerciseType == "Plank")
+        local basePoints = LP.exerciseProperties[exerciseType].points
+        local count = isTimeBased and 20 or 10  -- Plank is 20 seconds, others are 10 reps
+        local pointsEarned = count * basePoints * currentLevel.pointMultiplier
+        
+        LP:DebugPrint("Recorded completion for", exerciseType, "at", timestamp, 
+                     "Challenge Level:", currentLevel.name,
+                     "Points earned:", math.floor(pointsEarned),
+                     "Total completions:", #LP.db.stats[exerciseType])
+        
+        -- Print confirmation with points earned
+        print(addonName .. ": Exercise completed! Earned " .. math.floor(pointsEarned) .. 
+              " points at " .. currentLevel.name .. " difficulty level.")
     else
         LP:DebugPrint("Cannot record completion: Could not parse exercise type from", exerciseText)
     end
@@ -221,35 +293,103 @@ function LP:ProcessSlashCommand(msg)
             local totalCompletions = 0
             local totalPoints = 0
             
-            -- Point values for each exercise type
+            -- Create stats summary by challenge level
+            local challengeLevelStats = {}
+            for i=1, #LP.challengeLevels do
+                challengeLevelStats[i] = {
+                    count = 0,
+                    points = 0
+                }
+            end
+            
+            -- Point values for each exercise type (points per single rep/second)
             local pointValues = {
-                Pushups = 4,  -- 4 points per push-up
-                Squats = 2,   -- 2 points per squat
-                Situps = 1,   -- 1 point per sit-up
-                Plank = 3    -- 3 points per plank
+                Pushups = 4,  -- 4 points per push-up, 40 per set of 10
+                Squats = 2,   -- 2 points per squat, 20 per set of 10
+                Situps = 1,   -- 1 point per sit-up, 10 per set of 10
+                Plank = 3     -- 3 points per plank second, 60 per 20 seconds
             }
             
-            for exType, timestamps in pairs(LP.db.stats) do
-                local count = #timestamps
+            -- Track overall stats for each exercise type
+            local exerciseStats = {}
+            
+            for exType, records in pairs(LP.db.stats) do
+                local count = #records
                 totalCompletions = totalCompletions + count
+                exerciseStats[exType] = {
+                    count = count,
+                    points = 0,
+                    lastTime = count > 0 and (type(records[count]) == "table" and records[count].timestamp or records[count]) or "Never"
+                }
                 
-                -- Check if this is a time-based exercise
-                local isTimeBased = (exType == "Plank")
-                local multiplier = isTimeBased and 1 or 10
-                local displayMultiplier = isTimeBased and 20 or 10
-                local unit = isTimeBased and "seconds" or "reps"
+                -- Process each record
+                for _, record in ipairs(records) do
+                    -- Handle both old (string timestamp) and new (table with timestamp and challenge level) formats
+                    local challengeLevel
+                    
+                    if type(record) == "table" then
+                        challengeLevel = record.challengeLevel or 2 -- Default to Challenger if not set
+                    else
+                        -- Legacy format (just a timestamp string)
+                        challengeLevel = 2 -- Default to Challenger for old data
+                    end
+                    
+                    -- Check if this is a time-based exercise
+                    local isTimeBased = (exType == "Plank")
+                    local countMultiplier = isTimeBased and 20 or 10  -- Full set of reps or seconds
+                    local displayMultiplier = isTimeBased and 20 or 10
+                    
+                    -- Get point multiplier from challenge level
+                    local pointMultiplier = 1.0
+                    if LP.challengeLevels[challengeLevel] then
+                        pointMultiplier = LP.challengeLevels[challengeLevel].pointMultiplier
+                    end
+                    
+                    local points = countMultiplier * (pointValues[exType] or 0) * pointMultiplier
+                    totalPoints = totalPoints + points
+                    exerciseStats[exType].points = exerciseStats[exType].points + points
+                    
+                    -- Add to challenge level stats
+                    challengeLevelStats[challengeLevel].count = challengeLevelStats[challengeLevel].count + 1
+                    challengeLevelStats[challengeLevel].points = challengeLevelStats[challengeLevel].points + points
+                end
                 
-                local points = count * multiplier * (pointValues[exType] or 0)
-                totalPoints = totalPoints + points
-                local lastTime = count > 0 and timestamps[count] or "Never"
+                -- Display each exercise's total stats
+                local unit = (exType == "Plank") and "seconds" or "reps"
+                local baseCount = exerciseStats[exType].count * displayMultiplier
                 print(string.format("  - %s: %d %s (%d pts) (Last: %s)", 
                     exType, 
-                    count * displayMultiplier, 
+                    baseCount, 
                     unit,
-                    points, 
-                    lastTime))
+                    math.floor(exerciseStats[exType].points), 
+                    exerciseStats[exType].lastTime))
             end
-            print("  Total: " .. totalCompletions * 10 .. " exercises (" .. totalPoints .. " points)")
+            
+            -- Display totals by challenge level
+            print("  Challenge Level Breakdown:")
+            local showChallengeBreakdown = false
+            for i, stats in pairs(challengeLevelStats) do
+                if stats.count > 0 then
+                    showChallengeBreakdown = true
+                    print(string.format("    - %s: %d exercises (%d pts)", 
+                        LP.challengeLevels[i].name,
+                        stats.count,
+                        math.floor(stats.points)))
+                end
+            end
+            
+            if not showChallengeBreakdown then
+                print("    No challenge level data available.")
+            end
+            
+            -- Display overall totals
+            print("  Overall Total: " .. totalCompletions .. " exercises (" .. math.floor(totalPoints) .. " points)")
+            
+            -- Show current challenge level
+            local currentLevel = LP.challengeLevels[LP.db.challengeLevel]
+            print("  Current Challenge Level: " .. currentLevel.name .. 
+                 " (" .. (currentLevel.repMultiplier * 100) .. "% reps, " .. 
+                 (currentLevel.pointMultiplier * 100) .. "% points)")
         else
             print(addonName .. ": Statistics data not found.")
         end
@@ -569,12 +709,47 @@ function LP:GetNextExercise()
     -- Increment index, wrap around using modulo
     LP.db.lastExerciseIndex = (LP.db.lastExerciseIndex or 0) % #LP.exercises + 1
     local nextExerciseIndex = LP.db.lastExerciseIndex
-    local nextExercise = LP.exercises[nextExerciseIndex]
+    local baseExercise = LP.exercises[nextExerciseIndex]
+    
+    -- Get the current challenge level
+    local challengeLevel = LP.challengeLevels[LP.db.challengeLevel]
+    local repMultiplier = challengeLevel.repMultiplier or 1.0
+    local pointMultiplier = challengeLevel.pointMultiplier or 1.0
+    
+    -- Determine the exercise type and adjust the count based on challenge level
+    local exerciseType, originalCount
+    if string.find(baseExercise, "Second Plank") then
+        exerciseType = "Plank"
+        originalCount = 20 -- 20 seconds for Plank
+    else
+        exerciseType, originalCount = string.match(baseExercise, "(%d+) (.*)$")
+        originalCount = tonumber(exerciseType) -- The capture is flipped, exerciseType has the number
+        exerciseType = string.match(baseExercise, "%d+ (.*)$")
+    end
+    
+    -- Calculate adjusted count based on challenge level
+    local adjustedCount = math.floor(originalCount * repMultiplier)
+    if adjustedCount < 1 then adjustedCount = 1 end -- Ensure minimum of 1
+    
+    -- Calculate the points that would be awarded for this exercise
+    local basePoints = LP.exerciseProperties[exerciseType].points
+    local countMultiplier = (exerciseType == "Plank") and 20 or 10 -- Full set of reps or seconds
+    local pointsForExercise = math.floor(countMultiplier * basePoints * pointMultiplier)
+    
+    -- Format the exercise string with the adjusted count
+    local adjustedExercise
+    if exerciseType == "Plank" then
+        adjustedExercise = adjustedCount .. " Second Plank"
+    else
+        adjustedExercise = adjustedCount .. " " .. exerciseType
+    end
 
-    -- Stat incrementing is removed, happens on completion now
-
-    LP:DebugPrint("Next exercise index: " .. nextExerciseIndex)
-    return nextExercise
+    LP:DebugPrint("Next exercise index: " .. nextExerciseIndex .. 
+                 ", exercise: " .. adjustedExercise .. 
+                 ", challenge level: " .. challengeLevel.name .. 
+                 ", points: " .. pointsForExercise)
+    
+    return adjustedExercise
 end
 
 -- New helper function to get player's team index

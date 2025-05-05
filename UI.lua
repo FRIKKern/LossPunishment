@@ -221,7 +221,11 @@ function LP:CycleExercise(direction)
     
     -- Find the current index in the exercises array
     for i, exerciseText in ipairs(LP.exercises) do
-        if exerciseText == currentExerciseText then
+        -- We need to compare the exercise type, not the entire string which includes the count
+        local currentType = string.match(currentExerciseText, "%d+ (.*)$")
+        local listType = string.match(exerciseText, "%d+ (.*)$")
+        
+        if currentType == listType then
             currentIndex = i
             break
         end
@@ -249,8 +253,8 @@ function LP:CycleExercise(direction)
         exerciseType = "Plank"
         originalCount = 20 -- 20 seconds for Plank
     else
-        exerciseType, originalCount = string.match(baseExercise, "(%d+) (.*)$")
-        originalCount = tonumber(exerciseType) -- The capture is flipped, exerciseType has the number
+        -- Correctly extract the count and type from the base exercise
+        originalCount = tonumber(string.match(baseExercise, "^(%d+)"))
         exerciseType = string.match(baseExercise, "%d+ (.*)$")
     end
     
@@ -271,9 +275,12 @@ function LP:CycleExercise(direction)
     LP.ExerciseFrame.currentExercise = adjustedExercise
     
     -- Calculate points for the new exercise
-    local basePoints = LP.exerciseProperties[exerciseType].points
-    local countMultiplier = (exerciseType == "Plank") and 20 or 10 -- Full set of reps or seconds
-    local pointsForExercise = math.floor(countMultiplier * basePoints * pointMultiplier)
+    local pointsForExercise = 0
+    if LP.exerciseProperties and LP.exerciseProperties[exerciseType] then
+        local basePoints = LP.exerciseProperties[exerciseType].points
+        -- For each exercise, calculate points based on actual adjusted count (not the base multiplier)
+        pointsForExercise = math.floor(adjustedCount * basePoints * pointMultiplier)
+    end
     
     -- Update points tooltip
     local pointsText = "Points: " .. pointsForExercise .. " pts"

@@ -46,17 +46,18 @@ end
 -- Function to calculate statistics for different time periods
 function LP:CalculateStats()
     local stats = {
-        today = { Pushups = 0, Squats = 0, Situps = 0, total = 0, points = 0 },
-        week = { Pushups = 0, Squats = 0, Situps = 0, total = 0, points = 0 },
-        month = { Pushups = 0, Squats = 0, Situps = 0, total = 0, points = 0 },
-        allTime = { Pushups = 0, Squats = 0, Situps = 0, total = 0, points = 0 }
+        today = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0 },
+        week = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0 },
+        month = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0 },
+        allTime = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0 }
     }
     
     -- Point values for each exercise type
     local pointValues = {
         Pushups = 4,  -- 4 points per push-up
         Squats = 2,   -- 2 points per squat
-        Situps = 1    -- 1 point per sit-up
+        Situps = 1,   -- 1 point per sit-up
+        Plank = 3     -- 3 points per plank
     }
     
     -- Always return initialized stats even if no data exists yet
@@ -69,38 +70,43 @@ function LP:CalculateStats()
     LP.db.stats.Pushups = LP.db.stats.Pushups or {}
     LP.db.stats.Squats = LP.db.stats.Squats or {}
     LP.db.stats.Situps = LP.db.stats.Situps or {}
+    LP.db.stats.Plank = LP.db.stats.Plank or {}
     
     LP:DebugPrint("Calculating stats from " .. 
                  #LP.db.stats.Pushups .. " pushups, " ..
                  #LP.db.stats.Squats .. " squats, " ..
-                 #LP.db.stats.Situps .. " situps")
+                 #LP.db.stats.Situps .. " situps, " ..
+                 #LP.db.stats.Plank .. " planks")
     
     for exType, timestamps in pairs(LP.db.stats) do
         for _, timestamp in ipairs(timestamps) do
+            -- Determine the multiplier based on exercise type
+            local multiplier = (exType == "Plank") and 1 or 10  -- Plank is already per unit, others are counted in sets of 10
+            
             -- All time
             stats.allTime[exType] = stats.allTime[exType] + 1
             stats.allTime.total = stats.allTime.total + 1
-            stats.allTime.points = stats.allTime.points + (pointValues[exType] or 0) * 10
+            stats.allTime.points = stats.allTime.points + (pointValues[exType] or 0) * multiplier
             
             -- Today
             if LP:IsWithinTimePeriod(timestamp, "today") then
                 stats.today[exType] = stats.today[exType] + 1
                 stats.today.total = stats.today.total + 1
-                stats.today.points = stats.today.points + (pointValues[exType] or 0) * 10
+                stats.today.points = stats.today.points + (pointValues[exType] or 0) * multiplier
             end
             
             -- This week
             if LP:IsWithinTimePeriod(timestamp, "week") then
                 stats.week[exType] = stats.week[exType] + 1
                 stats.week.total = stats.week.total + 1
-                stats.week.points = stats.week.points + (pointValues[exType] or 0) * 10
+                stats.week.points = stats.week.points + (pointValues[exType] or 0) * multiplier
             end
             
             -- This month
             if LP:IsWithinTimePeriod(timestamp, "month") then
                 stats.month[exType] = stats.month[exType] + 1
                 stats.month.total = stats.month.total + 1
-                stats.month.points = stats.month.points + (pointValues[exType] or 0) * 10
+                stats.month.points = stats.month.points + (pointValues[exType] or 0) * multiplier
             end
         end
     end
@@ -157,6 +163,12 @@ function LP:CreateHistoryWindow()
     situpsButton:SetPoint("LEFT", squatsButton, "RIGHT", 10, 0)
     situpsButton:SetText("Situps")
     
+    -- Plank button
+    local plankButton = CreateFrame("Button", "LossPunishmentHistoryPlankButton", filterFrame, "UIPanelButtonTemplate")
+    plankButton:SetSize(70, 25)
+    plankButton:SetPoint("LEFT", situpsButton, "RIGHT", 10, 0)
+    plankButton:SetText("Plank")
+    
     -- Column Headers
     local headerFrame = CreateFrame("Frame", "LossPunishmentHistoryHeaderFrame", window)
     headerFrame:SetPoint("TOPLEFT", filterFrame, "BOTTOMLEFT", 0, -5)
@@ -212,7 +224,7 @@ function LP:CreateHistoryWindow()
             button2 = "No",
             OnAccept = function()
                 -- Reset all stats
-                LP.db.stats = { Pushups = {}, Squats = {}, Situps = {} }
+                LP.db.stats = { Pushups = {}, Squats = {}, Situps = {}, Plank = {} }
                 
                 -- Refresh the history window
                 window:PopulateHistoryList(window.currentFilter or "All")
@@ -250,7 +262,8 @@ function LP:CreateHistoryWindow()
         local pointValues = {
             Pushups = 4,  -- 4 points per push-up
             Squats = 2,   -- 2 points per squat
-            Situps = 1    -- 1 point per sit-up
+            Situps = 1,   -- 1 point per sit-up
+            Plank = 3     -- 3 points per plank
         }
         
         -- Collect all entries based on filter
@@ -262,17 +275,22 @@ function LP:CreateHistoryWindow()
         end
         
         if not LP.db.stats then
-            LP.db.stats = { Pushups = {}, Squats = {}, Situps = {} }
+            LP.db.stats = { Pushups = {}, Squats = {}, Situps = {}, Plank = {} }
         end
         
         for exType, timestamps in pairs(LP.db.stats) do
             if filter == "All" or filter == exType then
                 for i, timestamp in ipairs(timestamps) do
+                    -- Determine if the exercise is measured in time or reps
+                    local isTimeBased = (exType == "Plank")
+                    local multiplier = isTimeBased and 1 or 10
+                    
                     table.insert(entries, {
                         exType = exType,
                         timestamp = timestamp,
                         index = i,
-                        points = (pointValues[exType] or 0) * 10 -- Calculate points
+                        isTimeBased = isTimeBased,
+                        points = (pointValues[exType] or 0) * multiplier -- Calculate points
                     })
                 end
             end
@@ -332,7 +350,14 @@ function LP:CreateHistoryWindow()
             row:Show()
             row:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -rowHeight * (i - 1))
             row.typeText:SetText(entry.exType)
-            row.numberText:SetText("10 " .. entry.exType) -- Based on the standard format
+            
+            -- Display either reps or seconds based on exercise type
+            if entry.isTimeBased then
+                row.numberText:SetText("20 Seconds " .. entry.exType)
+            else
+                row.numberText:SetText("10 " .. entry.exType)
+            end
+            
             row.pointsText:SetText(entry.points .. " pts")
             row.timeText:SetText(entry.timestamp)
         end
@@ -350,6 +375,7 @@ function LP:CreateHistoryWindow()
     pushupsButton:SetScript("OnClick", function() window:PopulateHistoryList("Pushups") end)
     squatsButton:SetScript("OnClick", function() window:PopulateHistoryList("Squats") end)
     situpsButton:SetScript("OnClick", function() window:PopulateHistoryList("Situps") end)
+    plankButton:SetScript("OnClick", function() window:PopulateHistoryList("Plank") end)
     
     -- Close on escape key
     window:SetScript("OnKeyDown", function(self, key)
@@ -377,17 +403,18 @@ function LP:CreateOptionsPanel()
     
     -- Initialize stats tables if they don't exist
     if not LP.db.stats then
-        LP.db.stats = { Pushups = {}, Squats = {}, Situps = {} }
+        LP.db.stats = { Pushups = {}, Squats = {}, Situps = {}, Plank = {} }
     end
     
     -- Ensure all exercise types exist in stats
     LP.db.stats.Pushups = LP.db.stats.Pushups or {}
     LP.db.stats.Squats = LP.db.stats.Squats or {}
     LP.db.stats.Situps = LP.db.stats.Situps or {}
+    LP.db.stats.Plank = LP.db.stats.Plank or {}
     
     -- Initialize enabled exercises if they don't exist
     if not LP.db.enabledExercises then
-        LP.db.enabledExercises = { Pushups = true, Squats = true, Situps = true }
+        LP.db.enabledExercises = { Pushups = true, Squats = true, Situps = true, Plank = true }
     end
     
     -- Pre-calculate stats once to have them ready
@@ -447,15 +474,26 @@ function LP:CreateOptionsPanel()
         LP:UpdateExercisesList()
     end)
     
+    -- Plank checkbox (time-based exercise)
+    local plankCheckbox = CreateFrame("CheckButton", "LossPunishmentPlankCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
+    plankCheckbox:SetPoint("TOPLEFT", situpsCheckbox, "BOTTOMLEFT", 0, -5)
+    plankCheckbox.text = _G[plankCheckbox:GetName() .. "Text"]
+    plankCheckbox.text:SetText("Enable Plank (3 pts per 20 seconds)")
+    plankCheckbox:SetChecked(LP.db.enabledExercises.Plank)
+    plankCheckbox:SetScript("OnClick", function(self)
+        LP.db.enabledExercises.Plank = self:GetChecked()
+        LP:UpdateExercisesList()
+    end)
+    
     -- Section Title: Statistics
     local statsTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    statsTitle:SetPoint("TOPLEFT", situpsCheckbox, "BOTTOMLEFT", 0, -20)
+    statsTitle:SetPoint("TOPLEFT", plankCheckbox, "BOTTOMLEFT", 0, -20)
     statsTitle:SetText("Exercise Statistics")
     
     -- Add point system explanation
     local pointsExplanation = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     pointsExplanation:SetPoint("TOPLEFT", statsTitle, "BOTTOMLEFT", 0, -5)
-    pointsExplanation:SetText("(Push-ups = 4 pts, Squats = 2 pts, Sit-ups = 1 pt per rep)")
+    pointsExplanation:SetText("(Push-ups = 4 pts, Squats = 2 pts, Sit-ups = 1 pt per rep, Plank = 3 pts per 20 sec)")
     pointsExplanation:SetJustifyH("LEFT")
     pointsExplanation:SetWidth(400)
     
@@ -497,8 +535,8 @@ function LP:CreateOptionsPanel()
     end
     
     -- Exercise types with point values
-    local exerciseTypes = {"Pushups", "Squats", "Situps"}
-    local exerciseLabels = {"Push-ups (4 pts)", "Squats (2 pts)", "Sit-ups (1 pt)"}
+    local exerciseTypes = {"Pushups", "Squats", "Situps", "Plank"}
+    local exerciseLabels = {"Push-ups (4 pts)", "Squats (2 pts)", "Sit-ups (1 pt)", "Plank (3 pts)"}
     local statsLabels = {}
     local statsValues = {}
     
@@ -605,6 +643,7 @@ function LP:CreateOptionsPanel()
     panel.pushupsCheckbox = pushupsCheckbox
     panel.squatsCheckbox = squatsCheckbox
     panel.situpsCheckbox = situpsCheckbox
+    panel.plankCheckbox = plankCheckbox
     
     -- Panel refresh function
     panel.refresh = function()
@@ -614,23 +653,28 @@ function LP:CreateOptionsPanel()
         panel.pushupsCheckbox:SetChecked(LP.db.enabledExercises.Pushups)
         panel.squatsCheckbox:SetChecked(LP.db.enabledExercises.Squats)
         panel.situpsCheckbox:SetChecked(LP.db.enabledExercises.Situps)
+        panel.plankCheckbox:SetChecked(LP.db.enabledExercises.Plank)
         
         -- Calculate stats for all time periods
         local stats = LP:CalculateStats()
         LP.cachedStats = stats -- Update the cache
         
-        -- Exercise counts - show in reps
+        -- Exercise counts - show in reps or seconds based on exercise type
         for i, exType in ipairs(panel.exerciseTypes) do
             if panel.statsValues[exType] then
-                panel.statsValues[exType]["Today"]:SetText(stats.today[exType] * 10 .. " reps")
-                panel.statsValues[exType]["This Week"]:SetText(stats.week[exType] * 10 .. " reps")
-                panel.statsValues[exType]["This Month"]:SetText(stats.month[exType] * 10 .. " reps")
-                panel.statsValues[exType]["All Time"]:SetText(stats.allTime[exType] * 10 .. " reps")
+                local isTimeBased = (exType == "Plank")
+                local unit = isTimeBased and " sec" or " reps"
+                local multiplier = isTimeBased and 20 or 10
+                
+                panel.statsValues[exType]["Today"]:SetText(stats.today[exType] * multiplier .. unit)
+                panel.statsValues[exType]["This Week"]:SetText(stats.week[exType] * multiplier .. unit)
+                panel.statsValues[exType]["This Month"]:SetText(stats.month[exType] * multiplier .. unit)
+                panel.statsValues[exType]["All Time"]:SetText(stats.allTime[exType] * multiplier .. unit)
                 LP:DebugPrint("Set " .. exType .. " stats: " .. 
-                             (stats.today[exType] * 10) .. " today, " ..
-                             (stats.week[exType] * 10) .. " week, " ..
-                             (stats.month[exType] * 10) .. " month, " ..
-                             (stats.allTime[exType] * 10) .. " all time")
+                             (stats.today[exType] * multiplier) .. " today, " ..
+                             (stats.week[exType] * multiplier) .. " week, " ..
+                             (stats.month[exType] * multiplier) .. " month, " ..
+                             (stats.allTime[exType] * multiplier) .. " all time")
             else
                 LP:DebugPrint("Missing statsValues for " .. exType)
             end

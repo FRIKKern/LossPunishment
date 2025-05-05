@@ -3,13 +3,22 @@ local addonName, addonTable = ...
 -- Create a namespace for the addon
 LossPunishment = LossPunishment or {}
 local LP = LossPunishment
-LP.Version = "0.1.9" -- Update version to match .toc file
+LP.Version = "0.1.10" -- Update version to match .toc file
 
 -- List of exercises
 LP.exercises = {
     "10 Pushups",
     "10 Squats",
-    "10 Situps"
+    "10 Situps",
+    "20 Second Plank"
+}
+
+-- Exercise types and their properties
+LP.exerciseProperties = {
+    Pushups = { isTimeBased = false, count = 10, points = 4 },
+    Squats = { isTimeBased = false, count = 10, points = 2 },
+    Situps = { isTimeBased = false, count = 10, points = 1 },
+    Plank = { isTimeBased = true, count = 20, points = 3 }
 }
 
 -- Database for storing loss records (will be loaded from SavedVariables)
@@ -54,12 +63,13 @@ function LP:Initialize()
             losses = {}, -- Example structure
             lastExerciseIndex = 0, -- Initialize index for rotation
             -- Change stats to store lists of timestamps
-            stats = { Pushups = {}, Squats = {}, Situps = {} },
+            stats = { Pushups = {}, Squats = {}, Situps = {}, Plank = {} },
             -- Add settings for exercise toggling
             enabledExercises = {
                 Pushups = true,
                 Squats = true,
-                Situps = true
+                Situps = true,
+                Plank = true
             },
             debugMode = false -- Debug mode off by default
         }
@@ -70,16 +80,20 @@ function LP:Initialize()
     LP.db.lastExerciseIndex = LP.db.lastExerciseIndex or 0
     -- Ensure stats table and exercise lists exist (with basic backward compatibility)
     if type(LP.db.stats) ~= "table" then 
-        LP.db.stats = { Pushups = {}, Squats = {}, Situps = {} }
+        LP.db.stats = { Pushups = {}, Squats = {}, Situps = {}, Plank = {} }
     end
     LP.db.stats.Pushups = type(LP.db.stats.Pushups) == "table" and LP.db.stats.Pushups or {}
     LP.db.stats.Squats = type(LP.db.stats.Squats) == "table" and LP.db.stats.Squats or {}
     LP.db.stats.Situps = type(LP.db.stats.Situps) == "table" and LP.db.stats.Situps or {}
+    LP.db.stats.Plank = type(LP.db.stats.Plank) == "table" and LP.db.stats.Plank or {}
     
     -- Ensure enabled exercises settings exist
     if type(LP.db.enabledExercises) ~= "table" then
-        LP.db.enabledExercises = { Pushups = true, Squats = true, Situps = true }
+        LP.db.enabledExercises = { Pushups = true, Squats = true, Situps = true, Plank = true }
     end
+
+    -- Add Plank to enabled exercises if it doesn't exist (for backward compatibility)
+    LP.db.enabledExercises.Plank = LP.db.enabledExercises.Plank ~= nil and LP.db.enabledExercises.Plank or true
 
     -- Update exercises list based on enabled settings
     LP:UpdateExercisesList()
@@ -126,7 +140,14 @@ function LP:RecordExerciseCompletion(exerciseText)
         return
     end
 
-    local exerciseType = string.match(exerciseText, "%d+ (.*)$")
+    -- Parse exercise type from the text
+    local exerciseType
+    if string.find(exerciseText, "Second Plank") then
+        exerciseType = "Plank"
+    else
+        exerciseType = string.match(exerciseText, "%d+ (.*)$")
+    end
+    
     if exerciseType and LP.db.stats[exerciseType] then
         local timestamp = date("%Y-%m-%d %H:%M:%S") -- Get current date and time
         table.insert(LP.db.stats[exerciseType], timestamp) -- Add timestamp to the list
@@ -204,18 +225,31 @@ function LP:ProcessSlashCommand(msg)
             local pointValues = {
                 Pushups = 4,  -- 4 points per push-up
                 Squats = 2,   -- 2 points per squat
-                Situps = 1    -- 1 point per sit-up
+                Situps = 1,   -- 1 point per sit-up
+                Plank = 3    -- 3 points per plank
             }
             
             for exType, timestamps in pairs(LP.db.stats) do
                 local count = #timestamps
                 totalCompletions = totalCompletions + count
-                local points = count * 10 * (pointValues[exType] or 0)
+                
+                -- Check if this is a time-based exercise
+                local isTimeBased = (exType == "Plank")
+                local multiplier = isTimeBased and 1 or 10
+                local displayMultiplier = isTimeBased and 20 or 10
+                local unit = isTimeBased and "seconds" or "reps"
+                
+                local points = count * multiplier * (pointValues[exType] or 0)
                 totalPoints = totalPoints + points
                 local lastTime = count > 0 and timestamps[count] or "Never"
-                print(string.format("  - %s: %d reps (%d pts) (Last: %s)", exType, count * 10, points, lastTime))
+                print(string.format("  - %s: %d %s (%d pts) (Last: %s)", 
+                    exType, 
+                    count * displayMultiplier, 
+                    unit,
+                    points, 
+                    lastTime))
             end
-            print("  Total: " .. totalCompletions * 10 .. " reps (" .. totalPoints .. " points)")
+            print("  Total: " .. totalCompletions * 10 .. " exercises (" .. totalPoints .. " points)")
         else
             print(addonName .. ": Statistics data not found.")
         end
@@ -1123,6 +1157,10 @@ function LP:UpdateExercisesList()
     
     if LP.db.enabledExercises.Situps then
         table.insert(LP.exercises, "10 Situps")
+    end
+    
+    if LP.db.enabledExercises.Plank then
+        table.insert(LP.exercises, "20 Second Plank")
     end
     
     -- If no exercises are enabled, enable pushups as a fallback

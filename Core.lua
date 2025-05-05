@@ -3,7 +3,7 @@ local addonName, addonTable = ...
 -- Create a namespace for the addon
 LossPunishment = LossPunishment or {}
 local LP = LossPunishment
-LP.Version = "0.1.13" -- Update version to match .toc file
+LP.Version = "0.1.14" -- Update version to match .toc file
 
 -- List of exercises
 LP.exercises = {
@@ -16,9 +16,9 @@ LP.exercises = {
 -- Exercise types and their properties
 LP.exerciseProperties = {
     Pushups = { isTimeBased = false, count = 10, points = 4 }, -- 4 pts per push-up = 40 pts per set
-    Squats = { isTimeBased = false, count = 10, points = 2 },  -- 2 pts per squat = 20 pts per set
-    Situps = { isTimeBased = false, count = 10, points = 1 },  -- 1 pt per sit-up = 10 pts per set
-    Plank = { isTimeBased = true, count = 20, points = 3 }     -- 3 pts per second = 60 pts per 20 sec
+    Squats = { isTimeBased = false, count = 10, points = 3 },  -- 3 pts per squat = 30 pts per set
+    Situps = { isTimeBased = false, count = 10, points = 3 },  -- 3 pts per sit-up = 30 pts per set
+    Plank = { isTimeBased = true, count = 20, points = 1.8 }   -- 1.8 pts per second = 36 pts per 20 sec (40% nerf)
 }
 
 -- Challenge levels with multipliers for difficulty and points
@@ -307,7 +307,7 @@ function LP:ProcessSlashCommand(msg)
                 Pushups = 4,  -- 4 points per push-up, 40 per set of 10
                 Squats = 2,   -- 2 points per squat, 20 per set of 10
                 Situps = 1,   -- 1 point per sit-up, 10 per set of 10
-                Plank = 3     -- 3 points per plank second, 60 per 20 seconds
+                Plank = 1.8   -- 1.8 points per plank second, 36 per 20 seconds (40% nerf)
             }
             
             -- Track overall stats for each exercise type

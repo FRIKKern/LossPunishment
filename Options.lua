@@ -43,21 +43,143 @@ function LP:IsWithinTimePeriod(timestamp, period)
     end
 end
 
--- Function to calculate statistics for different time periods
-function LP:CalculateStats()
+-- Function to calculate statistics for the last week (previous 7 days from the start of this week)
+function LP:CalculateLastWeekStats()
     local stats = {
-        today = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0 },
-        week = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0 },
-        month = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0 },
-        allTime = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0 }
+        Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0,
+        exercisePoints = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0 },
+        actualReps = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0 } -- Track actual reps/seconds
     }
     
     -- Point values for each exercise type (per rep)
     local pointValues = {
         Pushups = 4,  -- 4 points per push-up, 40 per set of 10
-        Squats = 2,   -- 2 points per squat, 20 per set of 10
-        Situps = 1,   -- 1 point per sit-up, 10 per set of 10
-        Plank = 3     -- 3 points per plank second, 60 per 20 seconds
+        Squats = 3,   -- 3 points per squat, 30 per set of 10
+        Situps = 3,   -- 3 point per sit-up, 30 per set of 10
+        Plank = 1.8   -- 1.8 points per plank second, 36 per 20 seconds (40% nerf)
+    }
+    
+    -- Always return initialized stats even if no data exists yet
+    if not LP.db or not LP.db.stats then 
+        LP:DebugPrint("No stats data found for last week, returning zeros")
+        return stats 
+    end
+    
+    -- Get current date information
+    local now = time()
+    local dateTable = date("*t", now)
+    
+    -- Calculate the start of this week (Monday)
+    local dayOfWeek = dateTable.wday - 1 -- 0 (Sun) through 6 (Sat)
+    if dayOfWeek == 0 then dayOfWeek = 7 end -- Convert Sunday from 0 to 7
+    local startOfThisWeek = time({
+        year = dateTable.year,
+        month = dateTable.month,
+        day = dateTable.day - dayOfWeek + 1,
+        hour = 0,
+        min = 0,
+        sec = 0
+    })
+    
+    -- Calculate the start and end of last week
+    local startOfLastWeek = startOfThisWeek - (7 * 86400) -- 7 days before this week started
+    local endOfLastWeek = startOfThisWeek - 1 -- 1 second before this week started
+    
+    -- Process each exercise type
+    for exType, entries in pairs(LP.db.stats) do
+        for _, entry in ipairs(entries) do
+            -- Handle both old (string timestamp) and new (table with timestamp and challenge level) formats
+            local timestamp, challengeLevel
+            
+            if type(entry) == "table" then
+                timestamp = entry.timestamp
+                challengeLevel = entry.challengeLevel or 2 -- Default to Challenger if not set
+            else
+                -- Legacy format (just a timestamp string)
+                timestamp = entry
+                challengeLevel = 2 -- Default to Challenger for old data
+            end
+            
+            -- Parse the timestamp (format: "YYYY-MM-DD HH:MM:SS")
+            local year, month, day, hour, min, sec = timestamp:match("(%d+)-(%d+)-(%d+) (%d+):(%d+):(%d+)")
+            if not year then
+                LP:DebugPrint("Invalid timestamp format: " .. timestamp)
+                -- Skip to the next iteration (we can't use goto in Lua 5.1)
+            else
+                local timestampTime = time({
+                    year = tonumber(year),
+                    month = tonumber(month),
+                    day = tonumber(day),
+                    hour = tonumber(hour),
+                    min = tonumber(min),
+                    sec = tonumber(sec)
+                })
+                
+                -- Check if this exercise was completed during last week
+                if timestampTime >= startOfLastWeek and timestampTime <= endOfLastWeek then
+                    -- Determine the multiplier based on exercise type
+                    local countMultiplier = (exType == "Plank") and 20 or 10  -- Full set of reps or seconds
+                    
+                    -- Get point multiplier from challenge level
+                    local pointMultiplier = 1.0
+                    local repMultiplier = 1.0
+                    if challengeLevel and LP.challengeLevels[challengeLevel] then
+                        pointMultiplier = LP.challengeLevels[challengeLevel].pointMultiplier
+                        repMultiplier = LP.challengeLevels[challengeLevel].repMultiplier
+                    end
+                    
+                    -- Calculate actual reps/seconds for this entry based on challenge level
+                    local actualCount = math.floor(countMultiplier * repMultiplier)
+                    if actualCount < 1 then actualCount = 1 end -- Ensure minimum of 1
+                    
+                    -- Calculate total points for this entry
+                    local entryPoints = pointValues[exType] * countMultiplier * pointMultiplier
+                    
+                    -- Update stats
+                    stats[exType] = stats[exType] + 1
+                    stats.total = stats.total + 1
+                    stats.points = stats.points + entryPoints
+                    stats.exercisePoints[exType] = stats.exercisePoints[exType] + entryPoints
+                    stats.actualReps[exType] = stats.actualReps[exType] + actualCount
+                end
+            end
+        end
+    end
+    
+    return stats
+end
+
+-- Function to calculate statistics for different time periods
+function LP:CalculateStats()
+    local stats = {
+        today = { 
+            Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0, 
+            exercisePoints = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0 },
+            actualReps = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0 } -- Track actual reps/seconds
+        },
+        week = { 
+            Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0, 
+            exercisePoints = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0 },
+            actualReps = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0 } -- Track actual reps/seconds
+        },
+        month = { 
+            Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0, 
+            exercisePoints = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0 },
+            actualReps = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0 } -- Track actual reps/seconds
+        },
+        allTime = { 
+            Pushups = 0, Squats = 0, Situps = 0, Plank = 0, total = 0, points = 0, 
+            exercisePoints = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0 },
+            actualReps = { Pushups = 0, Squats = 0, Situps = 0, Plank = 0 } -- Track actual reps/seconds
+        }
+    }
+    
+    -- Point values for each exercise type (per rep)
+    local pointValues = {
+        Pushups = 4,  -- 4 points per push-up, 40 per set of 10
+        Squats = 3,   -- 3 points per squat, 30 per set of 10
+        Situps = 3,   -- 3 point per sit-up, 30 per set of 10
+        Plank = 1.8   -- 1.8 points per plank second, 36 per 20 seconds (40% nerf)
     }
     
     -- Always return initialized stats even if no data exists yet
@@ -92,14 +214,20 @@ function LP:CalculateStats()
                 challengeLevel = 2 -- Default to Challenger for old data
             end
             
-            -- Determine the multiplier based on exercise type
+            -- Determine the base multiplier based on exercise type
             local countMultiplier = (exType == "Plank") and 20 or 10  -- Full set of reps or seconds
             
             -- Get point multiplier from challenge level
             local pointMultiplier = 1.0
+            local repMultiplier = 1.0
             if challengeLevel and LP.challengeLevels[challengeLevel] then
                 pointMultiplier = LP.challengeLevels[challengeLevel].pointMultiplier
+                repMultiplier = LP.challengeLevels[challengeLevel].repMultiplier
             end
+            
+            -- Calculate actual reps/seconds for this entry based on challenge level
+            local actualCount = math.floor(countMultiplier * repMultiplier)
+            if actualCount < 1 then actualCount = 1 end -- Ensure minimum of 1
             
             -- Calculate total points for this entry
             local entryPoints = pointValues[exType] * countMultiplier * pointMultiplier
@@ -108,12 +236,16 @@ function LP:CalculateStats()
             stats.allTime[exType] = stats.allTime[exType] + 1
             stats.allTime.total = stats.allTime.total + 1
             stats.allTime.points = stats.allTime.points + entryPoints
+            stats.allTime.exercisePoints[exType] = stats.allTime.exercisePoints[exType] + entryPoints
+            stats.allTime.actualReps[exType] = stats.allTime.actualReps[exType] + actualCount
             
             -- Today
             if LP:IsWithinTimePeriod(timestamp, "today") then
                 stats.today[exType] = stats.today[exType] + 1
                 stats.today.total = stats.today.total + 1
                 stats.today.points = stats.today.points + entryPoints
+                stats.today.exercisePoints[exType] = stats.today.exercisePoints[exType] + entryPoints
+                stats.today.actualReps[exType] = stats.today.actualReps[exType] + actualCount
             end
             
             -- This week
@@ -121,6 +253,8 @@ function LP:CalculateStats()
                 stats.week[exType] = stats.week[exType] + 1
                 stats.week.total = stats.week.total + 1
                 stats.week.points = stats.week.points + entryPoints
+                stats.week.exercisePoints[exType] = stats.week.exercisePoints[exType] + entryPoints
+                stats.week.actualReps[exType] = stats.week.actualReps[exType] + actualCount
             end
             
             -- This month
@@ -128,6 +262,8 @@ function LP:CalculateStats()
                 stats.month[exType] = stats.month[exType] + 1
                 stats.month.total = stats.month.total + 1
                 stats.month.points = stats.month.points + entryPoints
+                stats.month.exercisePoints[exType] = stats.month.exercisePoints[exType] + entryPoints
+                stats.month.actualReps[exType] = stats.month.actualReps[exType] + actualCount
             end
         end
     end
@@ -282,8 +418,8 @@ function LP:CreateHistoryWindow()
         -- Point values for each exercise type (for full sets)
         local pointValues = {
             Pushups = 4,  -- 4 points per push-up, 40 per set of 10
-            Squats = 2,   -- 2 points per squat, 20 per set of 10
-            Situps = 1,   -- 1 point per sit-up, 10 per set of 10
+            Squats = 3,   -- 3 points per squat, 30 per set of 10
+            Situps = 3,   -- 3 point per sit-up, 30 per set of 10
             Plank = 3     -- 3 points per plank second, 60 per 20 seconds
         }
         
@@ -507,9 +643,21 @@ function LP:CreateOptionsPanel()
     description:SetText("Configure exercise options and view your stats.")
     description:SetJustifyH("LEFT")
     
-    -- Section Title: Exercise Settings
-    local exerciseSettingsTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    exerciseSettingsTitle:SetPoint("TOPLEFT", description, "BOTTOMLEFT", 0, -20)
+    -- Create a scroll frame to contain all the content
+    local scrollFrame = CreateFrame("ScrollFrame", "LossPunishmentOptionsScrollFrame", panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", description, "BOTTOMLEFT", 0, -10)
+    scrollFrame:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -30, 10) -- Leave room for scroll bar
+
+    -- Create the scrollable content frame
+    local scrollChild = CreateFrame("Frame", "LossPunishmentOptionsScrollChild", scrollFrame)
+    scrollFrame:SetScrollChild(scrollChild)
+    scrollChild:SetWidth(scrollFrame:GetWidth())
+    -- Initially set a reasonable height - will be adjusted later
+    scrollChild:SetHeight(800)
+
+    -- Section Title: Exercise Settings - Now in the scroll frame
+    local exerciseSettingsTitle = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    exerciseSettingsTitle:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 16, -10)
     exerciseSettingsTitle:SetText("Exercise Settings")
     
     -- Helper function to create dynamic checkbox labels
@@ -548,8 +696,8 @@ function LP:CreateOptionsPanel()
             pointColor, adjustedCount, unit)
     end
     
-    -- Pushups checkbox
-    local pushupsCheckbox = CreateFrame("CheckButton", "LossPunishmentPushupsCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
+    -- Pushups checkbox - Now in the scroll frame
+    local pushupsCheckbox = CreateFrame("CheckButton", "LossPunishmentPushupsCheckbox", scrollChild, "InterfaceOptionsCheckButtonTemplate")
     pushupsCheckbox:SetPoint("TOPLEFT", exerciseSettingsTitle, "BOTTOMLEFT", 0, -10)
     pushupsCheckbox.text = _G[pushupsCheckbox:GetName() .. "Text"]
     pushupsCheckbox.text:SetText(GetCheckboxLabel("Pushups", 4, "", 10))
@@ -560,10 +708,10 @@ function LP:CreateOptionsPanel()
     end)
     
     -- Squats checkbox
-    local squatsCheckbox = CreateFrame("CheckButton", "LossPunishmentSquatsCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
+    local squatsCheckbox = CreateFrame("CheckButton", "LossPunishmentSquatsCheckbox", scrollChild, "InterfaceOptionsCheckButtonTemplate")
     squatsCheckbox:SetPoint("TOPLEFT", pushupsCheckbox, "BOTTOMLEFT", 0, -5)
     squatsCheckbox.text = _G[squatsCheckbox:GetName() .. "Text"]
-    squatsCheckbox.text:SetText(GetCheckboxLabel("Squats", 2, "", 10))
+    squatsCheckbox.text:SetText(GetCheckboxLabel("Squats", 3, "", 10))
     squatsCheckbox:SetChecked(LP.db.enabledExercises.Squats)
     squatsCheckbox:SetScript("OnClick", function(self)
         LP.db.enabledExercises.Squats = self:GetChecked()
@@ -571,10 +719,10 @@ function LP:CreateOptionsPanel()
     end)
     
     -- Situps checkbox
-    local situpsCheckbox = CreateFrame("CheckButton", "LossPunishmentSitupsCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
+    local situpsCheckbox = CreateFrame("CheckButton", "LossPunishmentSitupsCheckbox", scrollChild, "InterfaceOptionsCheckButtonTemplate")
     situpsCheckbox:SetPoint("TOPLEFT", squatsCheckbox, "BOTTOMLEFT", 0, -5)
     situpsCheckbox.text = _G[situpsCheckbox:GetName() .. "Text"]
-    situpsCheckbox.text:SetText(GetCheckboxLabel("Situps", 1, "", 10))
+    situpsCheckbox.text:SetText(GetCheckboxLabel("Situps", 3, "", 10))
     situpsCheckbox:SetChecked(LP.db.enabledExercises.Situps)
     situpsCheckbox:SetScript("OnClick", function(self)
         LP.db.enabledExercises.Situps = self:GetChecked()
@@ -582,7 +730,7 @@ function LP:CreateOptionsPanel()
     end)
     
     -- Plank checkbox (time-based exercise)
-    local plankCheckbox = CreateFrame("CheckButton", "LossPunishmentPlankCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
+    local plankCheckbox = CreateFrame("CheckButton", "LossPunishmentPlankCheckbox", scrollChild, "InterfaceOptionsCheckButtonTemplate")
     plankCheckbox:SetPoint("TOPLEFT", situpsCheckbox, "BOTTOMLEFT", 0, -5)
     plankCheckbox.text = _G[plankCheckbox:GetName() .. "Text"]
     plankCheckbox.text:SetText(GetCheckboxLabel("Plank", 3, " seconds", 20))
@@ -592,17 +740,17 @@ function LP:CreateOptionsPanel()
         LP:UpdateExercisesList()
     end)
     
-    -- Challenge Level Dropdown
-    local challengeLevelTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    -- Challenge Level Dropdown - Now in the scroll frame
+    local challengeLevelTitle = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     challengeLevelTitle:SetPoint("TOPLEFT", plankCheckbox, "BOTTOMLEFT", 0, -20)
     challengeLevelTitle:SetText("Challenge Level")
     
     -- Create challenge level dropdown to select different difficulty levels
-    local challengeLevelDropdown = CreateFrame("Frame", "LossPunishmentChallengeLevelDropdown", panel, "UIDropDownMenuTemplate")
+    local challengeLevelDropdown = CreateFrame("Frame", "LossPunishmentChallengeLevelDropdown", scrollChild, "UIDropDownMenuTemplate")
     challengeLevelDropdown:SetPoint("TOPLEFT", challengeLevelTitle, "BOTTOMLEFT", -15, -5)
     
-    -- More detailed challenge level description
-    local challengeLevelDesc = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    -- More detailed challenge level description - Now in the scroll frame
+    local challengeLevelDesc = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     challengeLevelDesc:SetPoint("TOPLEFT", challengeLevelDropdown, "BOTTOMLEFT", 20, -5)
     challengeLevelDesc:SetText("Higher challenge levels increase reps/seconds but award exponentially more points! Points are awarded based on your challenge level at the time of completion, not your current level.")
     challengeLevelDesc:SetJustifyH("LEFT")
@@ -644,66 +792,62 @@ function LP:CreateOptionsPanel()
                           " (" .. (LP.challengeLevels[LP.db.challengeLevel].repMultiplier * 100) .. "% reps, " .. 
                           (LP.challengeLevels[LP.db.challengeLevel].pointMultiplier * 100) .. "% points)")
     
-    -- Section Title: Statistics
-    local statsTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    -- Section Title: Statistics - Now in the scroll frame
+    local statsTitle = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     statsTitle:SetPoint("TOPLEFT", challengeLevelDesc, "BOTTOMLEFT", -20, -20)
     statsTitle:SetText("Exercise Statistics")
     
-    -- Add point system explanation with dynamic values
+    -- Helper function to get explanation text for points
     local function GetPointsExplanationText()
         local currentLevel = LP.challengeLevels[LP.db.challengeLevel]
         local pointMultiplier = currentLevel.pointMultiplier
         local repMultiplier = currentLevel.repMultiplier
         
-        -- Calculate adjusted counts
+        -- Calculate counts
         local pushupCount = math.floor(10 * repMultiplier)
         local squatCount = math.floor(10 * repMultiplier)
         local situpCount = math.floor(10 * repMultiplier)
         local plankCount = math.floor(20 * repMultiplier)
         
-        if pushupCount < 1 then pushupCount = 1 end
-        if squatCount < 1 then squatCount = 1 end
-        if situpCount < 1 then situpCount = 1 end
-        if plankCount < 1 then plankCount = 1 end
+        -- Use color based on difficulty
+        local pointColor = "|cFF00FF00" -- Green for default
         
-        -- Choose a color based on challenge level (brighter colors for higher levels)
-        local pointColor = "|cFFFFFFFF" -- Default white
-        
-        if LP.db.challengeLevel == 1 then -- Combatant
-            pointColor = "|cFF999999" -- Gray
-        elseif LP.db.challengeLevel == 2 then -- Challenger
-            pointColor = "|cFFFFFFFF" -- White
-        elseif LP.db.challengeLevel == 3 then -- Rival
-            pointColor = "|cFF00FF00" -- Green
-        elseif LP.db.challengeLevel == 4 then -- Duelist
-            pointColor = "|cFF00AAFF" -- Blue
-        elseif LP.db.challengeLevel == 5 then -- Elite
-            pointColor = "|cFFAA00FF" -- Purple
-        elseif LP.db.challengeLevel == 6 then -- Gladiator
-            pointColor = "|cFFFF9900" -- Orange
-        elseif LP.db.challengeLevel == 7 then -- Champion
+        if pointMultiplier < 1.0 then
+            pointColor = "|cFF888888" -- Gray
+        elseif pointMultiplier > 1.0 then
             pointColor = "|cFFFF0000" -- Red
         end
         
-        return string.format(
-            "(Push-ups: %s%d|r pts for %s%d|r reps, Squats: %s%d|r pts for %s%d|r reps, Sit-ups: %s%d|r pts for %s%d|r reps, Plank: %s%d|r pts for %s%d|r seconds)",
-            pointColor, math.floor(40 * pointMultiplier), pointColor, pushupCount,
-            pointColor, math.floor(20 * pointMultiplier), pointColor, squatCount,
-            pointColor, math.floor(10 * pointMultiplier), pointColor, situpCount,
-            pointColor, math.floor(60 * pointMultiplier), pointColor, plankCount
-        )
+        -- Calculate points based on challenge level and base values
+        local pushupBasePoints = 4 -- From exerciseProperties
+        local squatBasePoints = 3  -- From exerciseProperties
+        local situpBasePoints = 3  -- From exerciseProperties
+        local plankBasePoints = 1.8 -- From exerciseProperties (nerfed by 40%)
+        
+        local pushupPoints = math.floor(pushupBasePoints * 10 * pointMultiplier)
+        local squatPoints = math.floor(squatBasePoints * 10 * pointMultiplier) 
+        local situpPoints = math.floor(situpBasePoints * 10 * pointMultiplier)
+        local plankPoints = math.floor(plankBasePoints * 20 * pointMultiplier)
+        
+        -- return string.format(
+        --     "(Push-ups: %s%d|r pts for %s%d|r reps, Squats: %s%d|r pts for %s%d|r reps, Sit-ups: %s%d|r pts for %s%d|r reps, Plank: %s%d|r pts for %s%d|r seconds)",
+        --     pointColor, pushupPoints, pointColor, pushupCount,
+        --     pointColor, squatPoints, pointColor, squatCount,
+        --     pointColor, situpPoints, pointColor, situpCount,
+        --     pointColor, plankPoints, pointColor, plankCount
+        -- )
     end
     
-    local pointsExplanation = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    local pointsExplanation = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     pointsExplanation:SetPoint("TOPLEFT", statsTitle, "BOTTOMLEFT", 0, -5)
     pointsExplanation:SetText(GetPointsExplanationText())
     pointsExplanation:SetJustifyH("LEFT")
     pointsExplanation:SetWidth(400)
     
-    -- Statistics summary frame
-    local statsFrame = CreateFrame("Frame", "LossPunishmentStatsFrame", panel, "InsetFrameTemplate")
+    -- Statistics summary frame - Now in the scroll frame
+    local statsFrame = CreateFrame("Frame", "LossPunishmentStatsFrame", scrollChild, "InsetFrameTemplate")
     statsFrame:SetPoint("TOPLEFT", pointsExplanation, "BOTTOMLEFT", 0, -10)
-    statsFrame:SetSize(400, 170) -- Reduced height as we're simplifying the display
+    statsFrame:SetSize(590, 270) -- Reduced width from 650 to 550
     
     -- Create a grid background to help with alignment
     local gridBg = statsFrame:CreateTexture(nil, "BACKGROUND")
@@ -711,12 +855,12 @@ function LP:CreateOptionsPanel()
     gridBg:SetColorTexture(0.1, 0.1, 0.1, 0.2) -- Very subtle grid background
     
     -- Create period headers
-    local periodLabels = {"Today", "This Week", "This Month", "All Time"}
+    local periodLabels = {"Today", "This Week", "Last Week", "This Month", "All Time"}
     local periodFontStrings = {}
     
     -- Add horizontal line after headers
     local headerSeparator = statsFrame:CreateTexture(nil, "ARTWORK")
-    headerSeparator:SetSize(380, 1)
+    headerSeparator:SetSize(530, 1) -- Reduced from 630 to 530
     headerSeparator:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 10, -30)
     headerSeparator:SetColorTexture(0.5, 0.5, 0.5, 0.5)
     
@@ -725,93 +869,144 @@ function LP:CreateOptionsPanel()
     typeHeader:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 20, -15)
     typeHeader:SetText("Exercise")
     typeHeader:SetJustifyH("LEFT")
-    typeHeader:SetWidth(70)
+    typeHeader:SetWidth(80)
     
-    -- Period Headers
+    -- Period Headers - spread out more evenly across the narrower frame
     for i, period in ipairs(periodLabels) do
         local periodHeader = statsFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-        periodHeader:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 110 + (i-1) * 70, -15)
+        periodHeader:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 110 + (i-1) * 90, -15) -- Reduced spacing from 110 to 90
         periodHeader:SetText(period)
         periodHeader:SetJustifyH("CENTER")
-        periodHeader:SetWidth(60)
+        periodHeader:SetWidth(80) -- Reduced from 100 to 80
         periodFontStrings[period] = periodHeader
     end
     
-    -- Exercise types with point values
+    -- Exercise types without point values
     local exerciseTypes = {"Pushups", "Squats", "Situps", "Plank"}
-    local exerciseLabels = {"Push-ups (40 pts)", "Squats (20 pts)", "Sit-ups (10 pts)", "Plank (60 pts)"}
+    local exerciseLabels = {"Push-ups", "Squats", "Sit-ups", "Plank"}
     local statsLabels = {}
     local statsValues = {}
+    local statsPoints = {}
+    local statsSets = {}
     
     for i, exType in ipairs(exerciseTypes) do
         -- Create label
         statsLabels[i] = statsFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        statsLabels[i]:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 20, -40 - (i-1) * 25)
+        statsLabels[i]:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 20, -45 - (i-1) * 40) -- Increased vertical spacing
         statsLabels[i]:SetText(exerciseLabels[i] .. ":")
         statsLabels[i]:SetJustifyH("LEFT")
-        statsLabels[i]:SetWidth(90)
+        statsLabels[i]:SetWidth(80)
         
-        -- Create values for each time period
+        -- Create values for each time period (sets, reps/seconds, points)
         statsValues[exType] = {}
+        statsPoints[exType] = {}
+        statsSets[exType] = {}
+        
         for j, period in ipairs(periodLabels) do
-            local valueText = statsFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-            valueText:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 110 + (j-1) * 70, -40 - (i-1) * 25)
+            -- Sets text (smaller font)
+            local setsText = statsFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+            setsText:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 110 + (j-1) * 90, -40 - (i-1) * 40) -- Reduced spacing from 110 to 90
+            setsText:SetJustifyH("CENTER")
+            setsText:SetWidth(80) -- Reduced from 100 to 80
+            statsSets[exType][period] = setsText
+            
+            -- Values for reps/seconds (smaller font)
+            local valueText = statsFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+            valueText:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 110 + (j-1) * 90, -50 - (i-1) * 40) -- Reduced spacing from 110 to 90
             valueText:SetJustifyH("CENTER")
-            valueText:SetWidth(60)
+            valueText:SetWidth(80) -- Reduced from 100 to 80
             statsValues[exType][period] = valueText
+            
+            -- Points column (smaller font)
+            local pointsText = statsFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+            pointsText:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 110 + (j-1) * 90, -60 - (i-1) * 40) -- Reduced spacing from 110 to 90
+            pointsText:SetJustifyH("CENTER")
+            pointsText:SetWidth(80) -- Reduced from 100 to 80
+            statsPoints[exType][period] = pointsText
             
             -- Set initial values from cache (important for first-time display)
             if LP.cachedStats then
                 local value = 0
-                if period == "Today" then value = LP.cachedStats.today[exType] * 10
-                elseif period == "This Week" then value = LP.cachedStats.week[exType] * 10
-                elseif period == "This Month" then value = LP.cachedStats.month[exType] * 10
-                elseif period == "All Time" then value = LP.cachedStats.allTime[exType] * 10
+                local sets = 0
+                local points = 0
+                
+                if period == "Today" then
+                    sets = LP.cachedStats.today[exType]
+                    value = LP.cachedStats.today.actualReps and LP.cachedStats.today.actualReps[exType] or 0
+                    points = LP.cachedStats.today.exercisePoints and LP.cachedStats.today.exercisePoints[exType] or 0
+                elseif period == "Last Week" then
+                    -- Will be populated in the refresh function
+                    sets = 0
+                    value = 0
+                    points = 0
+                elseif period == "This Week" then
+                    sets = LP.cachedStats.week[exType]
+                    value = LP.cachedStats.week.actualReps and LP.cachedStats.week.actualReps[exType] or 0
+                    points = LP.cachedStats.week.exercisePoints and LP.cachedStats.week.exercisePoints[exType] or 0
+                elseif period == "This Month" then
+                    sets = LP.cachedStats.month[exType]
+                    value = LP.cachedStats.month.actualReps and LP.cachedStats.month.actualReps[exType] or 0
+                    points = LP.cachedStats.month.exercisePoints and LP.cachedStats.month.exercisePoints[exType] or 0
+                elseif period == "All Time" then
+                    sets = LP.cachedStats.allTime[exType]
+                    value = LP.cachedStats.allTime.actualReps and LP.cachedStats.allTime.actualReps[exType] or 0
+                    points = LP.cachedStats.allTime.exercisePoints and LP.cachedStats.allTime.exercisePoints[exType] or 0
                 end
-                valueText:SetText(value .. " reps")
+                
+                setsText:SetText(sets .. " sets")
+                valueText:SetText(value .. (exType == "Plank" and " sec" or " reps"))
+                pointsText:SetText(points .. " pts")
             else
-                valueText:SetText("0 reps")
+                setsText:SetText("0 sets")
+                valueText:SetText("0" .. (exType == "Plank" and " sec" or " reps"))
+                pointsText:SetText("0 pts")
             end
         end
         
         -- Add alternating row backgrounds
         if i % 2 == 1 then
             local rowBg = statsFrame:CreateTexture(nil, "BACKGROUND")
-            rowBg:SetSize(380, 25)
-            rowBg:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 10, -32 - (i-1) * 25)
+            rowBg:SetSize(530, 40) -- Reduced from 630 to 530
+            rowBg:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 10, -37 - (i-1) * 40)
             rowBg:SetColorTexture(0.2, 0.2, 0.2, 0.1)
         end
     end
     
     -- Horizontal line before total
     local totalSeparator = statsFrame:CreateTexture(nil, "ARTWORK")
-    totalSeparator:SetSize(380, 1)
-    totalSeparator:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 10, -40 - (#exerciseTypes * 25))
+    totalSeparator:SetSize(530, 1) -- Reduced from 630 to 530
+    totalSeparator:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 10, -45 - (#exerciseTypes * 40)) -- Adjusted for increased row height
     totalSeparator:SetColorTexture(0.5, 0.5, 0.5, 0.5)
     
     -- Total row
     local totalLabel = statsFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    totalLabel:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 20, -75 - (#exerciseTypes-1) * 25)
+    totalLabel:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 20, -65 - (#exerciseTypes * 40)) -- Adjusted for increased row height
     totalLabel:SetText("TOTAL POINTS:")
     totalLabel:SetJustifyH("LEFT")
-    totalLabel:SetWidth(90)
+    totalLabel:SetWidth(80)
     
     -- Total values for each period
     local totalValues = {}
     for j, period in ipairs(periodLabels) do
         local valueText = statsFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
-        valueText:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 110 + (j-1) * 70, -75 - (#exerciseTypes-1) * 25)
+        valueText:SetPoint("TOPLEFT", statsFrame, "TOPLEFT", 110 + (j-1) * 90, -65 - (#exerciseTypes * 40)) -- Reduced spacing from 110 to 90
         valueText:SetJustifyH("CENTER")
-        valueText:SetWidth(60)
+        valueText:SetWidth(80) -- Reduced from 100 to 80
         totalValues[period] = valueText
         
         -- Set initial total values from cache
         if LP.cachedStats then
             local value = 0
-            if period == "Today" then value = LP.cachedStats.today.points
-            elseif period == "This Week" then value = LP.cachedStats.week.points
-            elseif period == "This Month" then value = LP.cachedStats.month.points
-            elseif period == "All Time" then value = LP.cachedStats.allTime.points
+            if period == "Today" then 
+                value = LP.cachedStats.today.points
+            elseif period == "Last Week" then
+                value = 0 -- Will be populated in refresh
+            elseif period == "This Week" then 
+                value = LP.cachedStats.week.points
+            elseif period == "This Month" then 
+                value = LP.cachedStats.month.points
+            elseif period == "All Time" then 
+                value = LP.cachedStats.allTime.points
             end
             valueText:SetText(value .. " pts")
         else
@@ -819,10 +1014,10 @@ function LP:CreateOptionsPanel()
         end
     end
     
-    -- View History button
-    local viewHistoryButton = CreateFrame("Button", "LossPunishmentViewHistoryButton", panel, "UIPanelButtonTemplate")
+    -- View History button - Now in the scroll frame and closer to the stats frame
+    local viewHistoryButton = CreateFrame("Button", "LossPunishmentViewHistoryButton", scrollChild, "UIPanelButtonTemplate")
     viewHistoryButton:SetSize(150, 25)
-    viewHistoryButton:SetPoint("TOP", statsFrame, "BOTTOM", 0, -10)
+    viewHistoryButton:SetPoint("TOP", statsFrame, "BOTTOM", 0, -5) -- Reduced from -10 to -5 to tighten spacing
     viewHistoryButton:SetText("View Detailed History")
     viewHistoryButton:SetScript("OnClick", function()
         -- Create history window if it doesn't exist
@@ -838,6 +1033,19 @@ function LP:CreateOptionsPanel()
         historyWindow:SetFrameStrata("HIGH")
     end)
     
+    -- Calculate the total height of the scroll child
+    C_Timer.After(0.1, function()
+        local lastElement = viewHistoryButton
+        if lastElement:GetBottom() and scrollChild:GetTop() then
+            local totalHeight = math.abs(lastElement:GetBottom() - scrollChild:GetTop()) + 10 -- Reduced from 20 to 10
+            scrollChild:SetHeight(totalHeight)
+            LP:DebugPrint("Set scroll child height to " .. totalHeight)
+        else
+            scrollChild:SetHeight(600) -- Reduced from 800 to 600
+            LP:DebugPrint("Used fallback height of 600 for scroll child")
+        end
+    end)
+
     -- Store references globally for the refresh function
     panel.statsValues = statsValues
     panel.totalValues = totalValues
@@ -848,7 +1056,11 @@ function LP:CreateOptionsPanel()
     panel.situpsCheckbox = situpsCheckbox
     panel.plankCheckbox = plankCheckbox
     panel.pointsExplanation = pointsExplanation
-    
+    panel.statsSets = statsSets
+    panel.scrollChild = scrollChild
+    panel.scrollFrame = scrollFrame
+    panel.viewHistoryButton = viewHistoryButton
+
     -- Panel refresh function
     panel.refresh = function()
         LP:DebugPrint("Options panel refresh called")
@@ -861,8 +1073,8 @@ function LP:CreateOptionsPanel()
         
         -- Update checkbox labels with current challenge level point values
         panel.pushupsCheckbox.text:SetText(GetCheckboxLabel("Pushups", 4, "", 10))
-        panel.squatsCheckbox.text:SetText(GetCheckboxLabel("Squats", 2, "", 10))
-        panel.situpsCheckbox.text:SetText(GetCheckboxLabel("Situps", 1, "", 10))
+        panel.squatsCheckbox.text:SetText(GetCheckboxLabel("Squats", 3, "", 10))
+        panel.situpsCheckbox.text:SetText(GetCheckboxLabel("Situps", 3, "", 10))
         panel.plankCheckbox.text:SetText(GetCheckboxLabel("Plank", 3, " seconds", 20))
         
         -- Update points explanation with current challenge level values
@@ -872,23 +1084,46 @@ function LP:CreateOptionsPanel()
         local stats = LP:CalculateStats()
         LP.cachedStats = stats -- Update the cache
         
-        -- Exercise counts - show in reps or seconds based on exercise type
+        -- Calculate last week stats (previous 7 days from the start of this week)
+        local lastWeekStats = LP:CalculateLastWeekStats()
+        
+        -- Exercise counts - now display actual reps/seconds based on the challenge level at completion time
         for i, exType in ipairs(panel.exerciseTypes) do
             if panel.statsValues[exType] then
                 local isTimeBased = (exType == "Plank")
                 local unit = isTimeBased and " sec" or " reps"
-                local multiplier = isTimeBased and 20 or 10
                 
-                -- Display actual historical stats, not adjusted by current challenge level
-                panel.statsValues[exType]["Today"]:SetText(stats.today[exType] * multiplier .. unit)
-                panel.statsValues[exType]["This Week"]:SetText(stats.week[exType] * multiplier .. unit)
-                panel.statsValues[exType]["This Month"]:SetText(stats.month[exType] * multiplier .. unit)
-                panel.statsValues[exType]["All Time"]:SetText(stats.allTime[exType] * multiplier .. unit)
+                -- Update sets, values and points for each period - now using actual reps
+                -- Today
+                panel.statsSets[exType]["Today"]:SetText(stats.today[exType] .. " sets")
+                panel.statsValues[exType]["Today"]:SetText(stats.today.actualReps[exType] .. unit)
+                panel.statsPoints[exType]["Today"]:SetText(stats.today.exercisePoints[exType] .. " pts")
+                
+                -- Last Week
+                panel.statsSets[exType]["Last Week"]:SetText(lastWeekStats[exType] .. " sets")
+                panel.statsValues[exType]["Last Week"]:SetText(lastWeekStats.actualReps[exType] .. unit)
+                panel.statsPoints[exType]["Last Week"]:SetText(lastWeekStats.exercisePoints[exType] .. " pts")
+                
+                -- This Week
+                panel.statsSets[exType]["This Week"]:SetText(stats.week[exType] .. " sets")
+                panel.statsValues[exType]["This Week"]:SetText(stats.week.actualReps[exType] .. unit)
+                panel.statsPoints[exType]["This Week"]:SetText(stats.week.exercisePoints[exType] .. " pts")
+                
+                -- This Month
+                panel.statsSets[exType]["This Month"]:SetText(stats.month[exType] .. " sets")
+                panel.statsValues[exType]["This Month"]:SetText(stats.month.actualReps[exType] .. unit)
+                panel.statsPoints[exType]["This Month"]:SetText(stats.month.exercisePoints[exType] .. " pts")
+                
+                -- All Time
+                panel.statsSets[exType]["All Time"]:SetText(stats.allTime[exType] .. " sets")
+                panel.statsValues[exType]["All Time"]:SetText(stats.allTime.actualReps[exType] .. unit)
+                panel.statsPoints[exType]["All Time"]:SetText(stats.allTime.exercisePoints[exType] .. " pts")
+                
                 LP:DebugPrint("Set " .. exType .. " stats: " .. 
-                             (stats.today[exType] * multiplier) .. " today, " ..
-                             (stats.week[exType] * multiplier) .. " week, " ..
-                             (stats.month[exType] * multiplier) .. " month, " ..
-                             (stats.allTime[exType] * multiplier) .. " all time")
+                              stats.today.actualReps[exType] .. " today, " ..
+                              stats.week.actualReps[exType] .. " week, " ..
+                              stats.month.actualReps[exType] .. " month, " ..
+                              stats.allTime.actualReps[exType] .. " all time")
             else
                 LP:DebugPrint("Missing statsValues for " .. exType)
             end
@@ -897,22 +1132,41 @@ function LP:CreateOptionsPanel()
         -- Total exercises in points
         if panel.totalValues then
             panel.totalValues["Today"]:SetText(stats.today.points .. " pts")
+            panel.totalValues["Last Week"]:SetText(lastWeekStats.points .. " pts")
             panel.totalValues["This Week"]:SetText(stats.week.points .. " pts")
             panel.totalValues["This Month"]:SetText(stats.month.points .. " pts")
             panel.totalValues["All Time"]:SetText(stats.allTime.points .. " pts")
-            LP:DebugPrint("Set total points: " .. 
-                         stats.today.points .. " today, " ..
-                         stats.week.points .. " week, " ..
-                         stats.month.points .. " month, " ..
-                         stats.allTime.points .. " all time")
-        else
-            LP:DebugPrint("Missing totalValues")
         end
+        
+        -- Recalculate scroll height after content is updated
+        C_Timer.After(0.1, function()
+            if panel.scrollChild and panel.viewHistoryButton then
+                if panel.viewHistoryButton:GetBottom() and panel.scrollChild:GetTop() then
+                    local totalHeight = math.abs(panel.viewHistoryButton:GetBottom() - panel.scrollChild:GetTop()) + 10 -- Reduced from 20 to 10
+                    if totalHeight > 10 then
+                        panel.scrollChild:SetHeight(totalHeight)
+                        LP:DebugPrint("Updated scroll child height to " .. totalHeight)
+                    end
+                end
+            end
+        end)
     end
     
     -- Multi-refresh attempt on show for maximum reliability
     panel:SetScript("OnShow", function()
         LP:DebugPrint("Options panel OnShow triggered - starting multi-refresh")
+        
+        -- Ensure the scroll frame is properly sized
+        if scrollFrame and panel:GetWidth() and panel:GetHeight() then
+            scrollFrame:SetWidth(panel:GetWidth() - 45) -- Allow room for scroll bar
+            LP:DebugPrint("Set scroll frame width to " .. (panel:GetWidth() - 45))
+        end
+        
+        -- Ensure scroll child is properly sized
+        if scrollChild and scrollFrame:GetWidth() then
+            scrollChild:SetWidth(scrollFrame:GetWidth())
+            LP:DebugPrint("Set scroll child width to " .. scrollFrame:GetWidth())
+        end
         
         -- Immediate refresh
         panel.refresh()
@@ -934,7 +1188,10 @@ function LP:CreateOptionsPanel()
         LP.optionsCategory = category
         
         -- Make sure stats calculate even on first open for Dragonflight
-        category:SetCallback("OnRefresh", panel.refresh)
+        -- Check if category exists and has SetCallback method before using it
+        if category and type(category.SetCallback) == "function" then
+            category:SetCallback("OnRefresh", panel.refresh)
+        end
     else
         -- Fallback for older versions of WoW
         InterfaceOptions_AddCategory(panel)
